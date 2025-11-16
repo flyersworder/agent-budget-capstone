@@ -6,6 +6,7 @@ from typing import Any
 
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
+from google.genai import types
 
 from agent_budget import AgentFactory, AllocationStrategy, UsageMonitor
 from agent_budget.monitor import AgentMetrics
@@ -149,15 +150,22 @@ class ExperimentRunner:
             agent = self.factory.create_agent(strategy, total_budget)
 
             # Create runner and session
-            runner = Runner(agent=agent, session_service=self.session_service)
-            session = await runner.session_service.create_session()
+            runner = Runner(
+                agent=agent, app_name="experiment", session_service=self.session_service
+            )
+            session = await runner.session_service.create_session(
+                app_name="experiment", user_id="researcher"
+            )
 
             # Execute task and collect events
             start_time = time.time()
             events = []
 
+            # Create message content
+            message = types.Content(role="user", parts=[types.Part(text=task.question)])
+
             async for event in runner.run_async(
-                user_message=task.question, session_id=session.id
+                user_id="researcher", session_id=session.id, new_message=message
             ):
                 events.append(event)
 

@@ -115,6 +115,9 @@ class UsageMonitor:
         tool_usage: dict[str, dict[str, int]] = {}
 
         for event in events:
+            # Track tool use prompt tokens for this event
+            event_tool_tokens = 0
+
             # Extract token usage from events with usage_metadata
             if hasattr(event, "usage_metadata") and event.usage_metadata:
                 # Accumulate reasoning tokens (thinking)
@@ -126,6 +129,11 @@ class UsageMonitor:
                 candidates = getattr(event.usage_metadata, "candidates_token_count", 0)
                 if candidates:
                     output_tokens += candidates
+
+                # Track tool use prompt tokens (for grounding results)
+                event_tool_tokens = (
+                    getattr(event.usage_metadata, "tool_use_prompt_token_count", 0) or 0
+                )
 
             # Track tool calls
             # Note: Event structure may vary - this is a best-effort approach
@@ -144,6 +152,20 @@ class UsageMonitor:
                             if tool_name not in tool_usage:
                                 tool_usage[tool_name] = {"count": 0, "tokens": 0}
                             tool_usage[tool_name]["count"] += 1
+
+            # Check for grounding metadata (google_search uses this instead of function_call)
+            if hasattr(event, "grounding_metadata") and event.grounding_metadata:
+                gm = event.grounding_metadata
+                # Check if web_search_queries exist (indicates google_search was used)
+                if hasattr(gm, "web_search_queries") and gm.web_search_queries:
+                    tool_name = "google_search"
+                    if tool_name not in tool_usage:
+                        tool_usage[tool_name] = {"count": 0, "tokens": 0}
+                    # Count number of search queries as separate calls
+                    tool_usage[tool_name]["count"] += len(gm.web_search_queries)
+                    # Add grounding result tokens (from tool_use_prompt_token_count)
+                    if event_tool_tokens:
+                        tool_usage[tool_name]["tokens"] += event_tool_tokens
 
         # Convert tool usage to ToolUsageMetrics objects
         tool_metrics = [

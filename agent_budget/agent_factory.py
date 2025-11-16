@@ -4,14 +4,19 @@ This module provides a factory class for creating Google ADK agents
 with specific token budget allocations.
 """
 
+import os
 from typing import Any
 
+from dotenv import load_dotenv
 from google.adk.agents import Agent
 from google.adk.planners import BuiltInPlanner
 from google.adk.tools import google_search
 from google.genai import types
 
 from .core import AllocationStrategy
+
+# Load environment variables
+load_dotenv()
 
 
 class AgentFactory:
@@ -77,6 +82,13 @@ class AgentFactory:
                 "Provide thorough, detailed responses with extensive context."
             ),
         }
+
+        # Verify API key is in environment
+        if not os.getenv("GOOGLE_API_KEY"):
+            raise ValueError(
+                "GOOGLE_API_KEY not found in environment. "
+                "Please set it in .env file or environment variables."
+            )
 
         return Agent(
             model=self.model,
