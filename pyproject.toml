@@ -1,0 +1,14 @@
+[project]
+name = "agent-budget-capstone"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "google-adk>=1.18.0",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.4.0",
+]
