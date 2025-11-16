@@ -1,0 +1,36 @@
+{
+  "metadata": {
+    "total_budget": 1000,
+    "test_mode": true,
+    "num_tasks": 1,
+    "num_strategies": 3,
+    "started_at": "2025-11-16 22:01:30",
+    "completed_at": "2025-11-16 22:01:35"
+  },
+  "results": [
+    {
+      "task_id": "simple_01",
+      "strategy": "deep",
+      "question": "What is quantum computing and what are its main applications?",
+      "response_preview": "**Defining Quantum Computing**\n\nI've started searching for a clear definition of quantum computing and its major applications. I'm focusing on reliable sources to synthesize a concise and insightful e...",
+      "response_length": 382,
+      "reasoning_tokens_used": 294,
+      "output_tokens_used": 20,
+      "total_tokens_used": 314,
+      "total_tool_calls": 2,
+      "tool_usage_details": [
+        {
+          "tool": "google_search",
+          "calls": 2,
+          "tokens": 189
+        }
+      ],
+      "duration_seconds": 4.358241081237793,
+      "quality_completeness": 4.5,
+      "quality_clarity": 10.0,
+      "quality_depth": 1.8749999999999998,
+      "quality_evidence": 0.0,
+      "quality_overall": 4.09375
+    }
+  ]
+}

@@ -121,7 +121,7 @@ class UsageMonitor:
             # Extract token usage from events with usage_metadata
             if hasattr(event, "usage_metadata") and event.usage_metadata:
                 # Accumulate reasoning tokens (thinking)
-                thinking = getattr(event.usage_metadata, "thinking_tokens", 0)
+                thinking = getattr(event.usage_metadata, "thoughts_token_count", 0)
                 if thinking:
                     reasoning_tokens += thinking
 

@@ -64,22 +64,34 @@ class AgentFactory:
         if tools is None:
             tools = [google_search]  # Default to built-in Google Search
 
-        # Strategy-specific instructions
+        # Strategy-specific instructions with budget awareness
         instructions = {
             "deep": (
-                "You are a research assistant that thinks deeply before acting. "
-                "Carefully plan your tool usage. Use tools only when necessary. "
-                "Provide concise, insightful responses based on thorough analysis."
+                f"BUDGET: You have {budget.reasoning_tokens} tokens for internal thinking "
+                f"and {budget.output_tokens} tokens for your final response.\n\n"
+                "STRATEGY: You are a 'Deep Thinker' agent. Use your large reasoning budget "
+                "to thoroughly analyze the problem, explore multiple angles, and plan your "
+                "approach carefully. Think deeply before acting. Use tools strategically "
+                "when they add value. Then provide a concise, well-reasoned response that "
+                "distills your analysis into key insights. Focus on quality over quantity "
+                "in your output."
             ),
             "balanced": (
-                "You are a research assistant with balanced thinking and output. "
-                "Use tools when helpful to gather information. "
-                "Provide clear, well-reasoned responses with appropriate detail."
+                f"BUDGET: You have {budget.reasoning_tokens} tokens for internal thinking "
+                f"and {budget.output_tokens} tokens for your final response.\n\n"
+                "STRATEGY: You are a 'Balanced' agent. You have equal budgets for thinking "
+                "and output. Allocate your resources proportionally to the task's needs. "
+                "Use reasoning to structure your approach and plan tool usage. Then provide "
+                "clear, appropriately detailed responses that balance depth and clarity."
             ),
             "verbose": (
-                "You are a research assistant that provides detailed explanations. "
-                "Use tools to gather comprehensive information. "
-                "Provide thorough, detailed responses with extensive context."
+                f"BUDGET: You have {budget.reasoning_tokens} tokens for internal thinking "
+                f"and {budget.output_tokens} tokens for your final response.\n\n"
+                "STRATEGY: You are a 'Verbose' agent. You have a large output budget to "
+                "provide comprehensive, detailed explanations. Your thinking budget is more "
+                "limited, so be efficient in your reasoning. Use tools to gather comprehensive "
+                "information, then focus on thorough, well-explained responses with extensive "
+                "context, examples, and supporting details."
             ),
         }
 
