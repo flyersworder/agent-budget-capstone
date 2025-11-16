@@ -13,3 +13,10 @@ dependencies = [
 dev = [
     "pre-commit>=4.4.0",
 ]
+analysis = [
+    "pandas>=2.2.0",
+    "matplotlib>=3.9.0",
+    "seaborn>=0.13.0",
+    "jupyter>=1.1.0",
+    "ipykernel>=6.29.0",
+]

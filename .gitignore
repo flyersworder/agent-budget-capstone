@@ -14,3 +14,11 @@ claude.md
 
 # Environment variables
 .env
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Generated visualizations and reports
+experiments/results/*.png
+experiments/results/*.csv
