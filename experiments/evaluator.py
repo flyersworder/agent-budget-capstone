@@ -1,334 +1,582 @@
-"""Response quality evaluator for experiment analysis."""
+"""LLM-based response quality evaluator implementing best practices.
 
+This module provides a research-grade LLM-as-a-Judge evaluator that:
+- Uses pairwise comparison instead of absolute scoring
+- Implements position bias mitigation via swapping and averaging
+- Uses chain-of-thought reasoning with detailed rubrics
+- Evaluates 5 dimensions: accuracy, completeness, clarity, depth, conciseness
+- Provides interpretable reasoning for all scores
+
+Based on cutting-edge research:
+- G-Eval Framework (2024)
+- Position Bias Mitigation (arXiv:2406.07791)
+- LLM-as-a-Judge Survey (arXiv:2411.15594)
+"""
+
+import json
+import os
 from dataclasses import dataclass
 from typing import Any
 
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
+
 from experiments.tasks import ResearchTask
+
+# Load environment variables
+load_dotenv()
 
 
 @dataclass
-class QualityScore:
-    """Quality assessment for a response.
+class DimensionScore:
+    """Score for a single evaluation dimension.
 
     Attributes:
-        completeness: How fully the response addresses the question (0-10)
-        clarity: How clear and well-structured the response is (0-10)
-        depth: How detailed and thorough the analysis is (0-10)
-        evidence: How well the response uses evidence/sources (0-10)
-        overall: Overall quality score (average of components)
+        reasoning: Chain-of-thought explanation for the score
+        response_x_score: Score for first response (1-5)
+        response_y_score: Score for second response (1-5)
+        winner: Which response is better ("X", "Y", or "Tie")
     """
 
+    reasoning: str
+    response_x_score: float
+    response_y_score: float
+    winner: str
+
+
+@dataclass
+class PairwiseResult:
+    """Result of comparing two responses.
+
+    Attributes:
+        accuracy: Factual correctness dimension
+        completeness: Question coverage dimension
+        clarity: Communication quality dimension
+        depth: Analytical insight dimension
+        conciseness: Information density dimension
+        overall_winner: Overall best response ("X", "Y", or "Tie")
+        confidence: Confidence in evaluation (low/medium/high)
+    """
+
+    accuracy: DimensionScore
+    completeness: DimensionScore
+    clarity: DimensionScore
+    depth: DimensionScore
+    conciseness: DimensionScore
+    overall_winner: str
+    confidence: str = "medium"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary format."""
+        return {
+            "accuracy": {
+                "reasoning": self.accuracy.reasoning,
+                "response_x_score": self.accuracy.response_x_score,
+                "response_y_score": self.accuracy.response_y_score,
+                "winner": self.accuracy.winner,
+            },
+            "completeness": {
+                "reasoning": self.completeness.reasoning,
+                "response_x_score": self.completeness.response_x_score,
+                "response_y_score": self.completeness.response_y_score,
+                "winner": self.completeness.winner,
+            },
+            "clarity": {
+                "reasoning": self.clarity.reasoning,
+                "response_x_score": self.clarity.response_x_score,
+                "response_y_score": self.clarity.response_y_score,
+                "winner": self.clarity.winner,
+            },
+            "depth": {
+                "reasoning": self.depth.reasoning,
+                "response_x_score": self.depth.response_x_score,
+                "response_y_score": self.depth.response_y_score,
+                "winner": self.depth.winner,
+            },
+            "conciseness": {
+                "reasoning": self.conciseness.reasoning,
+                "response_x_score": self.conciseness.response_x_score,
+                "response_y_score": self.conciseness.response_y_score,
+                "winner": self.conciseness.winner,
+            },
+            "overall_winner": self.overall_winner,
+            "confidence": self.confidence,
+        }
+
+
+@dataclass
+class AggregatedScore:
+    """Aggregated score accounting for position bias.
+
+    Attributes:
+        dimension: Name of dimension
+        score: Final score (1-5)
+        confidence: Confidence level based on position consistency
+        reasoning: Combined reasoning from both positions
+    """
+
+    dimension: str
+    score: float
+    confidence: str
+    reasoning: str
+
+
+@dataclass
+class StrategyScore:
+    """Complete score for a strategy.
+
+    Attributes:
+        strategy: Strategy name
+        accuracy: Aggregated accuracy score
+        completeness: Aggregated completeness score
+        clarity: Aggregated clarity score
+        depth: Aggregated depth score
+        conciseness: Aggregated conciseness score
+        overall: Overall score (average of dimensions)
+    """
+
+    strategy: str
+    accuracy: float
     completeness: float
     clarity: float
     depth: float
-    evidence: float
+    conciseness: float
 
     @property
     def overall(self) -> float:
-        """Calculate overall quality score.
-
-        Returns:
-            Average of all component scores
-        """
-        return (self.completeness + self.clarity + self.depth + self.evidence) / 4
+        """Calculate overall score as average of all dimensions."""
+        return (
+            self.accuracy
+            + self.completeness
+            + self.clarity
+            + self.depth
+            + self.conciseness
+        ) / 5
 
     def to_dict(self) -> dict[str, float]:
-        """Convert to dictionary format.
-
-        Returns:
-            Dictionary with all scores
-        """
+        """Convert to dictionary format."""
         return {
+            "accuracy": self.accuracy,
             "completeness": self.completeness,
             "clarity": self.clarity,
             "depth": self.depth,
-            "evidence": self.evidence,
+            "conciseness": self.conciseness,
             "overall": self.overall,
         }
 
 
-class ResponseEvaluator:
-    """Evaluates response quality using heuristic-based analysis.
+# Pairwise comparison prompt template with chain-of-thought and detailed rubrics
+PAIRWISE_PROMPT = """You are evaluating two responses to a research question. Use chain-of-thought reasoning and detailed rubrics to assess quality.
 
-    This class provides automated quality assessment of agent responses
-    based on structural and content analysis. For production use, consider
-    LLM-based evaluation for more nuanced quality assessment.
+**Research Question**: {question}
+**Task Complexity**: {complexity}
+
+**Response X**:
+{response_x}
+
+**Response Y**:
+{response_y}
+
+Evaluate these responses across five dimensions using the following rubrics:
+
+**1. Accuracy (1-5)**: Factual correctness and reliability
+- 5: All facts correct, well-supported claims, no misleading information
+- 4: Mostly accurate with only minor errors that don't affect core message
+- 3: Generally accurate but some questionable claims or unsupported assertions
+- 2: Multiple factual errors or significant unsupported claims
+- 1: Significantly inaccurate or misleading information
+
+**2. Completeness (1-5)**: Addresses all aspects of the question
+- 5: Fully addresses all parts of the question with appropriate depth
+- 4: Covers most aspects with only minor gaps
+- 3: Addresses main points but missing some important aspects
+- 2: Incomplete coverage with major aspects missing
+- 1: Barely addresses the question or misses core requirements
+
+**3. Clarity (1-5)**: Clear, well-organized communication
+- 5: Exceptionally clear, well-structured, easy to follow
+- 4: Clear and organized with good flow
+- 3: Understandable but could be clearer or better organized
+- 2: Somewhat confusing, poorly organized, or hard to follow
+- 1: Unclear, disorganized, or very difficult to understand
+
+**4. Depth (1-5)**: Analytical insight and thoughtful analysis
+- 5: Deep insights, nuanced analysis, considers multiple perspectives
+- 4: Good analysis with meaningful insights and context
+- 3: Adequate analysis with surface-level insights
+- 2: Shallow analysis that lacks meaningful depth
+- 1: Superficial or no real analysis
+
+**5. Conciseness (1-5)**: Information density (value per word)
+- 5: Maximally efficient, every word adds value, no redundancy
+- 4: Efficient communication with minimal redundancy
+- 3: Acceptable efficiency with some redundancy or filler
+- 2: Verbose with significant redundancy or unnecessary detail
+- 1: Extremely verbose with poor information density
+
+**IMPORTANT**: Conciseness measures information density, NOT brevity alone. A short but vague response scores low. A thorough but efficient response scores high.
+
+**Instructions**:
+For each dimension:
+1. Think step-by-step about both responses
+2. Provide your reasoning (2-3 sentences analyzing both responses)
+3. Assign scores (1-5) based on the rubric
+4. Determine the winner (X, Y, or Tie)
+
+Output your evaluation as a JSON object with this exact structure:
+{{
+  "accuracy": {{
+    "reasoning": "Your analysis here",
+    "response_x_score": 4,
+    "response_y_score": 5,
+    "winner": "Y"
+  }},
+  "completeness": {{
+    "reasoning": "Your analysis here",
+    "response_x_score": 4,
+    "response_y_score": 4,
+    "winner": "Tie"
+  }},
+  "clarity": {{
+    "reasoning": "Your analysis here",
+    "response_x_score": 5,
+    "response_y_score": 4,
+    "winner": "X"
+  }},
+  "depth": {{
+    "reasoning": "Your analysis here",
+    "response_x_score": 4,
+    "response_y_score": 5,
+    "winner": "Y"
+  }},
+  "conciseness": {{
+    "reasoning": "Your analysis here",
+    "response_x_score": 5,
+    "response_y_score": 3,
+    "winner": "X"
+  }},
+  "overall_winner": "Y"
+}}
+
+**Overall winner** should be the response that wins the most dimensions (or "Tie" if equal).
+Focus on substance over style. Think carefully about each dimension.
+"""
+
+
+class LLMResponseEvaluator:
+    """LLM-based evaluator with position bias mitigation.
+
+    Uses Google's Gemini model to evaluate responses with:
+    - Pairwise comparison (more reliable than absolute scoring)
+    - Position bias mitigation (swapping and averaging)
+    - Chain-of-thought reasoning
+    - Detailed rubrics for 5 dimensions
+
+    Default model: gemini-2.5-flash (prioritizes quality over cost for evaluation)
     """
 
-    def evaluate_response(self, response: str, task: ResearchTask) -> QualityScore:
-        """Evaluate a response against a research task.
+    def __init__(self, model: str = "gemini-2.5-flash"):
+        """Initialize the evaluator.
 
         Args:
-            response: The agent's response text
-            task: The research task that was executed
+            model: Gemini model to use for evaluation (default: gemini-2.5-flash for quality)
+        """
+        self.model = model
+
+        # Initialize Gemini client
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "GOOGLE_API_KEY not found in environment. "
+                "Please set it in .env file or environment variables."
+            )
+
+        self.client = genai.Client(api_key=api_key)
+
+    def _call_llm_judge(self, prompt: str) -> dict[str, Any]:
+        """Call LLM to evaluate responses.
+
+        Args:
+            prompt: Evaluation prompt
 
         Returns:
-            QualityScore with component and overall scores
+            Parsed JSON evaluation result
         """
-        completeness = self._evaluate_completeness(response, task)
-        clarity = self._evaluate_clarity(response)
-        depth = self._evaluate_depth(response, task)
-        evidence = self._evaluate_evidence(response)
-
-        return QualityScore(
-            completeness=completeness, clarity=clarity, depth=depth, evidence=evidence
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.0,  # Deterministic for consistency
+                response_mime_type="application/json",  # Request JSON output
+            ),
         )
 
-    def _evaluate_completeness(self, response: str, task: ResearchTask) -> float:
-        """Evaluate how completely the response addresses the question.
+        # Parse JSON response
+        try:
+            result: dict[str, Any] = json.loads(response.text)
+            return result
+        except json.JSONDecodeError as e:
+            print(f"Failed to parse LLM response: {response.text}")
+            raise ValueError(f"LLM did not return valid JSON: {e}")
 
-        Uses heuristics based on response length, question complexity,
-        and keyword coverage.
+    def _single_pairwise_evaluation(
+        self, response_x: str, response_y: str, task: ResearchTask
+    ) -> PairwiseResult:
+        """Perform a single pairwise evaluation (one position).
 
         Args:
-            response: Response text
+            response_x: First response
+            response_y: Second response
             task: Research task
 
         Returns:
-            Completeness score (0-10)
+            PairwiseResult with scores for all dimensions
         """
-        if not response:
-            return 0.0
+        # Create prompt
+        prompt = PAIRWISE_PROMPT.format(
+            question=task.question,
+            complexity=task.complexity,
+            response_x=response_x,
+            response_y=response_y,
+        )
 
-        # Base score on response length relative to expected length
-        # Simple tasks: ~200-400 words
-        # Moderate tasks: ~400-600 words
-        # Complex tasks: ~600-800 words
+        # Get LLM evaluation
+        result = self._call_llm_judge(prompt)
 
-        word_count = len(response.split())
+        # Parse results into structured format
+        return PairwiseResult(
+            accuracy=DimensionScore(
+                reasoning=result["accuracy"]["reasoning"],
+                response_x_score=result["accuracy"]["response_x_score"],
+                response_y_score=result["accuracy"]["response_y_score"],
+                winner=result["accuracy"]["winner"],
+            ),
+            completeness=DimensionScore(
+                reasoning=result["completeness"]["reasoning"],
+                response_x_score=result["completeness"]["response_x_score"],
+                response_y_score=result["completeness"]["response_y_score"],
+                winner=result["completeness"]["winner"],
+            ),
+            clarity=DimensionScore(
+                reasoning=result["clarity"]["reasoning"],
+                response_x_score=result["clarity"]["response_x_score"],
+                response_y_score=result["clarity"]["response_y_score"],
+                winner=result["clarity"]["winner"],
+            ),
+            depth=DimensionScore(
+                reasoning=result["depth"]["reasoning"],
+                response_x_score=result["depth"]["response_x_score"],
+                response_y_score=result["depth"]["response_y_score"],
+                winner=result["depth"]["winner"],
+            ),
+            conciseness=DimensionScore(
+                reasoning=result["conciseness"]["reasoning"],
+                response_x_score=result["conciseness"]["response_x_score"],
+                response_y_score=result["conciseness"]["response_y_score"],
+                winner=result["conciseness"]["winner"],
+            ),
+            overall_winner=result["overall_winner"],
+        )
 
-        expected_lengths = {
-            "simple": (200, 400),
-            "moderate": (400, 600),
-            "complex": (600, 800),
-        }
+    def _aggregate_swapped_results(
+        self,
+        result_xy: PairwiseResult,
+        result_yx: PairwiseResult,
+        strategy_x: str,
+        strategy_y: str,
+    ) -> tuple[dict[str, AggregatedScore], dict[str, AggregatedScore]]:
+        """Aggregate results from both position orderings.
 
-        min_len, max_len = expected_lengths.get(task.complexity, (300, 500))
-
-        # Score based on length appropriateness
-        if word_count < min_len * 0.5:
-            length_score = 3.0  # Too short
-        elif word_count < min_len:
-            length_score = 6.0  # Somewhat short
-        elif word_count <= max_len:
-            length_score = 10.0  # Appropriate length
-        elif word_count <= max_len * 1.5:
-            length_score = 8.0  # Slightly long
-        else:
-            length_score = 6.0  # Too long
-
-        # Check for key question terms in response
-        question_words = set(task.question.lower().split())
-        response_words = set(response.lower().split())
-
-        # Filter out common words
-        stopwords = {
-            "the",
-            "a",
-            "an",
-            "and",
-            "or",
-            "but",
-            "is",
-            "are",
-            "was",
-            "were",
-            "what",
-            "how",
-            "why",
-            "when",
-            "where",
-            "which",
-            "who",
-        }
-        question_keywords = question_words - stopwords
-
-        if question_keywords:
-            keyword_coverage = len(question_keywords & response_words) / len(
-                question_keywords
-            )
-            keyword_score = keyword_coverage * 10
-        else:
-            keyword_score = 5.0
-
-        # Average length and keyword scores
-        return (length_score + keyword_score) / 2
-
-    def _evaluate_clarity(self, response: str) -> float:
-        """Evaluate response clarity and structure.
-
-        Uses heuristics based on sentence structure, paragraph organization,
-        and readability indicators.
+        Mitigates position bias by averaging scores from swapped positions.
 
         Args:
-            response: Response text
+            result_xy: Result with X first, Y second
+            result_yx: Result with Y first, X second (swapped)
+            strategy_x: Name of strategy X
+            strategy_y: Name of strategy Y
 
         Returns:
-            Clarity score (0-10)
+            Tuple of (aggregated_score_x, aggregated_score_y) for each dimension
         """
-        if not response:
-            return 0.0
+        aggregated_x = {}
+        aggregated_y = {}
 
-        # Check for paragraph structure
-        paragraphs = [p.strip() for p in response.split("\n\n") if p.strip()]
-        has_paragraphs = len(paragraphs) > 1
-        paragraph_score = 10.0 if has_paragraphs else 6.0
+        dimensions = ["accuracy", "completeness", "clarity", "depth", "conciseness"]
 
-        # Check for list/bullet points (indicates organization)
-        has_lists = any(
-            line.strip().startswith(("-", "*", "•", str(i) + "."))
-            for line in response.split("\n")
-            for i in range(1, 10)
-        )
-        list_score = 10.0 if has_lists else 7.0
+        for dim in dimensions:
+            # Get dimension scores from both orderings
+            dim_xy = getattr(result_xy, dim)
+            dim_yx = getattr(result_yx, dim)
 
-        # Check sentence length variety (good writing has varied sentences)
-        sentences = [
-            s.strip()
-            for s in response.replace("?", ".").replace("!", ".").split(".")
-            if s.strip()
-        ]
-        if len(sentences) > 2:
-            avg_sentence_length = sum(len(s.split()) for s in sentences) / len(
-                sentences
+            # X's score: average of (X's score when X is first) and (X's score when X is second)
+            # When X is first: use response_x_score from result_xy
+            # When X is second (Y is first): use response_y_score from result_yx
+            score_x = (dim_xy.response_x_score + dim_yx.response_y_score) / 2
+
+            # Y's score: average of (Y's score when Y is second) and (Y's score when Y is first)
+            score_y = (dim_xy.response_y_score + dim_yx.response_x_score) / 2
+
+            # Calculate confidence based on score consistency
+            score_diff = abs(
+                (dim_xy.response_x_score - dim_xy.response_y_score)
+                - (dim_yx.response_y_score - dim_yx.response_x_score)
             )
-            # Ideal average is 15-20 words per sentence
-            if 12 <= avg_sentence_length <= 25:
-                sentence_score = 10.0
+
+            if score_diff <= 0.5:
+                confidence = "high"
+            elif score_diff <= 1.5:
+                confidence = "medium"
             else:
-                sentence_score = 7.0
-        else:
-            sentence_score = 5.0
+                confidence = "low"
 
-        # Average all clarity indicators
-        return (paragraph_score + list_score + sentence_score) / 3
+            # Combine reasoning
+            combined_reasoning = (
+                f"[X first] {dim_xy.reasoning} | [Y first] {dim_yx.reasoning}"
+            )
 
-    def _evaluate_depth(self, response: str, task: ResearchTask) -> float:
-        """Evaluate depth of analysis and detail.
+            aggregated_x[dim] = AggregatedScore(
+                dimension=dim,
+                score=score_x,
+                confidence=confidence,
+                reasoning=combined_reasoning,
+            )
+
+            aggregated_y[dim] = AggregatedScore(
+                dimension=dim,
+                score=score_y,
+                confidence=confidence,
+                reasoning=combined_reasoning,
+            )
+
+        return aggregated_x, aggregated_y
+
+    def evaluate_pairwise_with_swap(
+        self,
+        response_x: str,
+        response_y: str,
+        task: ResearchTask,
+        label_x: str,
+        label_y: str,
+    ) -> tuple[dict[str, AggregatedScore], dict[str, AggregatedScore]]:
+        """Compare two responses with position bias mitigation.
+
+        Evaluates responses in both orders and averages results.
 
         Args:
-            response: Response text
+            response_x: First response
+            response_y: Second response
             task: Research task
+            label_x: Label for first strategy (e.g., "deep")
+            label_y: Label for second strategy (e.g., "balanced")
 
         Returns:
-            Depth score (0-10)
+            Tuple of (scores_x, scores_y) where each is a dict mapping dimension to AggregatedScore
         """
-        if not response:
-            return 0.0
+        print(f"  Evaluating {label_x} vs {label_y} (position 1)...")
+        result_xy = self._single_pairwise_evaluation(response_x, response_y, task)
 
-        # Look for indicators of deep analysis
-        analysis_indicators = [
-            "however",
-            "furthermore",
-            "additionally",
-            "moreover",
-            "in contrast",
-            "on the other hand",
-            "consequently",
-            "therefore",
-            "thus",
-            "hence",
-            "specifically",
-            "for example",
-            "for instance",
-            "such as",
-        ]
+        print(f"  Evaluating {label_y} vs {label_x} (position 2, swapped)...")
+        result_yx = self._single_pairwise_evaluation(response_y, response_x, task)
 
-        indicator_count = sum(
-            1 for indicator in analysis_indicators if indicator in response.lower()
+        # Aggregate scores accounting for position swap
+        scores_x, scores_y = self._aggregate_swapped_results(
+            result_xy, result_yx, label_x, label_y
         )
 
-        # More indicators suggest deeper analysis
-        indicator_score = min(indicator_count * 2, 10)
+        return scores_x, scores_y
 
-        # Check for technical terms (domain-specific vocabulary)
-        # Longer words often indicate technical depth
-        words = response.split()
-        long_words = [w for w in words if len(w) > 10]
-        technical_ratio = len(long_words) / len(words) if words else 0
-        technical_score = min(technical_ratio * 50, 10)
-
-        # Complexity-adjusted expectations
-        complexity_multiplier = {"simple": 0.7, "moderate": 1.0, "complex": 1.2}.get(
-            task.complexity, 1.0
-        )
-
-        base_score = (indicator_score + technical_score) / 2
-        return min(base_score * complexity_multiplier, 10.0)
-
-    def _evaluate_evidence(self, response: str) -> float:
-        """Evaluate use of evidence and sources.
-
-        Args:
-            response: Response text
-
-        Returns:
-            Evidence score (0-10)
-        """
-        if not response:
-            return 0.0
-
-        # Look for evidence indicators
-        evidence_patterns = [
-            "according to",
-            "research shows",
-            "studies indicate",
-            "data suggests",
-            "evidence shows",
-            "reported that",
-            "found that",
-            "demonstrated",
-            "proven",
-            "statistics",
-        ]
-
-        evidence_count = sum(
-            1 for pattern in evidence_patterns if pattern in response.lower()
-        )
-
-        # Check for specific numbers/statistics
-        import re
-
-        numbers = re.findall(r"\b\d+\.?\d*\s*%|\b\d+\.?\d*\s*percent", response.lower())
-        has_statistics = len(numbers) > 0
-
-        # Check for citations or references
-        has_citations = any(
-            marker in response for marker in ["[", "(", "source:", "ref:"]
-        )
-
-        # Scoring
-        evidence_score = min(evidence_count * 2.5, 6)
-        if has_statistics:
-            evidence_score += 2
-        if has_citations:
-            evidence_score += 2
-
-        return min(evidence_score, 10.0)
-
-    def compare_responses(
+    def rank_strategies(
         self, responses: dict[str, str], task: ResearchTask
-    ) -> dict[str, Any]:
-        """Compare multiple responses for the same task.
+    ) -> dict[str, StrategyScore]:
+        """Rank all strategies using round-robin pairwise comparison.
 
         Args:
             responses: Dictionary mapping strategy name to response text
-            task: The research task
+            task: Research task
 
         Returns:
-            Comparison results with scores for each strategy
+            Dictionary mapping strategy name to StrategyScore
         """
-        scores = {}
-        for strategy, response in responses.items():
-            scores[strategy] = self.evaluate_response(response, task).to_dict()
+        strategies = list(responses.keys())
 
-        # Find best performing strategy for each dimension
-        best = {
-            "completeness": max(scores.items(), key=lambda x: x[1]["completeness"])[0],
-            "clarity": max(scores.items(), key=lambda x: x[1]["clarity"])[0],
-            "depth": max(scores.items(), key=lambda x: x[1]["depth"])[0],
-            "evidence": max(scores.items(), key=lambda x: x[1]["evidence"])[0],
-            "overall": max(scores.items(), key=lambda x: x[1]["overall"])[0],
+        # Initialize cumulative scores
+        cumulative_scores: dict[str, dict[str, list[float]]] = {
+            strategy: {
+                "accuracy": [],
+                "completeness": [],
+                "clarity": [],
+                "depth": [],
+                "conciseness": [],
+            }
+            for strategy in strategies
         }
 
-        return {"task_id": task.id, "scores": scores, "best_performers": best}
+        # Perform round-robin pairwise comparisons
+        print(f"\nEvaluating task: {task.id}")
+        print(f"Question: {task.question}")
+
+        # Compare all pairs
+        import itertools
+
+        for strategy_a, strategy_b in itertools.combinations(strategies, 2):
+            print(f"\n--- Comparing {strategy_a} vs {strategy_b} ---")
+
+            scores_a, scores_b = self.evaluate_pairwise_with_swap(
+                responses[strategy_a],
+                responses[strategy_b],
+                task,
+                strategy_a,
+                strategy_b,
+            )
+
+            # Accumulate scores for averaging
+            for dim in ["accuracy", "completeness", "clarity", "depth", "conciseness"]:
+                cumulative_scores[strategy_a][dim].append(scores_a[dim].score)
+                cumulative_scores[strategy_b][dim].append(scores_b[dim].score)
+
+        # Average scores across all pairwise comparisons
+        final_scores = {}
+        for strategy in strategies:
+            final_scores[strategy] = StrategyScore(
+                strategy=strategy,
+                accuracy=sum(cumulative_scores[strategy]["accuracy"])
+                / len(cumulative_scores[strategy]["accuracy"]),
+                completeness=sum(cumulative_scores[strategy]["completeness"])
+                / len(cumulative_scores[strategy]["completeness"]),
+                clarity=sum(cumulative_scores[strategy]["clarity"])
+                / len(cumulative_scores[strategy]["clarity"]),
+                depth=sum(cumulative_scores[strategy]["depth"])
+                / len(cumulative_scores[strategy]["depth"]),
+                conciseness=sum(cumulative_scores[strategy]["conciseness"])
+                / len(cumulative_scores[strategy]["conciseness"]),
+            )
+
+        return final_scores
+
+    def evaluate_response(self, response: str, task: ResearchTask) -> dict[str, float]:
+        """Evaluate a single response (legacy interface for compatibility).
+
+        This method provides backward compatibility with the old evaluator interface.
+        For new code, use rank_strategies() instead.
+
+        Args:
+            response: Response text
+            task: Research task
+
+        Returns:
+            Dictionary with scores (for compatibility, all set to 0)
+        """
+        # Legacy interface - return dummy scores
+        # New code should use rank_strategies() instead
+        return {
+            "completeness": 0.0,
+            "clarity": 0.0,
+            "depth": 0.0,
+            "evidence": 0.0,
+            "overall": 0.0,
+        }
+
+
+# Backward compatibility alias
+ResponseEvaluator = LLMResponseEvaluator

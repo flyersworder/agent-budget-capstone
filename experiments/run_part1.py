@@ -30,7 +30,8 @@ from datetime import datetime
 from pathlib import Path
 
 from agent_budget import AgentFactory, AllocationStrategy, UsageMonitor
-from experiments import ExperimentRunner, ResponseEvaluator
+from experiments import ExperimentRunner, LLMResponseEvaluator
+from experiments.runner import ExperimentResult
 from experiments.tasks import get_all_tasks, get_task_by_id
 
 
@@ -55,7 +56,7 @@ async def run_experiments(
     factory = AgentFactory()
     monitor = UsageMonitor()
     runner = ExperimentRunner(factory=factory, monitor=monitor)
-    evaluator = ResponseEvaluator()
+    evaluator = LLMResponseEvaluator()
 
     # Get tasks to run
     if task_id:
@@ -91,50 +92,75 @@ async def run_experiments(
         tasks=tasks, strategies=strategies, total_budget=total_budget
     )
 
-    # Evaluate responses
+    # Evaluate responses using LLM-based pairwise comparison
     print(f"\n{'=' * 60}")
-    print("Evaluating response quality...")
+    print("Evaluating response quality with LLM-as-a-Judge...")
     print(f"{'=' * 60}\n")
 
     evaluated_results = []
 
+    # Group results by task for pairwise comparison
+    task_groups: dict[str, dict[str, ExperimentResult]] = {}
     for result in suite.get_successful_results():
-        print(f"Evaluating {result.task_id} ({result.strategy})...")
+        if result.task_id not in task_groups:
+            task_groups[result.task_id] = {}
+        task_groups[result.task_id][result.strategy] = result
 
-        # Get the task for evaluation
-        task = get_task_by_id(result.task_id)
+    # Evaluate each task's responses via pairwise comparison
+    for task_id, task_results in task_groups.items():
+        # Get the task
+        task = get_task_by_id(task_id)
         if not task:
             continue
 
-        # Evaluate quality
-        quality_score = evaluator.evaluate_response(result.response, task)
-
-        # Combine metrics with quality scores
-        evaluated_result = {
-            "task_id": result.task_id,
-            "strategy": result.strategy,
-            "question": result.question,
-            "response_preview": result.response[:200] + "..."
-            if len(result.response) > 200
-            else result.response,
-            "response_length": len(result.response),
-            **result.metrics.to_dict(),
-            "quality_completeness": quality_score.completeness,
-            "quality_clarity": quality_score.clarity,
-            "quality_depth": quality_score.depth,
-            "quality_evidence": quality_score.evidence,
-            "quality_overall": quality_score.overall,
+        # Prepare responses for ranking
+        responses = {
+            strategy_name: result.response
+            for strategy_name, result in task_results.items()
         }
 
-        evaluated_results.append(evaluated_result)
+        # Only evaluate if we have all three strategies
+        if len(responses) != 3:
+            print(
+                f"⚠️  Skipping {task_id}: missing strategies (have {list(responses.keys())})"
+            )
+            continue
 
-        print(
-            f"  Quality: {quality_score.overall:.1f}/10 "
-            f"(C:{quality_score.completeness:.1f} "
-            f"Cl:{quality_score.clarity:.1f} "
-            f"D:{quality_score.depth:.1f} "
-            f"E:{quality_score.evidence:.1f})"
-        )
+        # Rank strategies using pairwise comparison with position bias mitigation
+        print(f"Evaluating {task_id}...")
+        strategy_scores = evaluator.rank_strategies(responses, task)
+
+        # Combine metrics with quality scores
+        for strategy_name, result in task_results.items():
+            quality_score = strategy_scores[strategy_name]
+
+            evaluated_result = {
+                "task_id": result.task_id,
+                "strategy": result.strategy,
+                "question": result.question,
+                "response_preview": result.response[:200] + "..."
+                if len(result.response) > 200
+                else result.response,
+                "response_length": len(result.response),
+                **result.metrics.to_dict(),
+                "quality_accuracy": quality_score.accuracy,
+                "quality_completeness": quality_score.completeness,
+                "quality_clarity": quality_score.clarity,
+                "quality_depth": quality_score.depth,
+                "quality_conciseness": quality_score.conciseness,
+                "quality_overall": quality_score.overall,
+            }
+
+            evaluated_results.append(evaluated_result)
+
+            print(
+                f"  {strategy_name.upper()}: Overall {quality_score.overall:.2f}/5 "
+                f"(A:{quality_score.accuracy:.2f} "
+                f"Co:{quality_score.completeness:.2f} "
+                f"Cl:{quality_score.clarity:.2f} "
+                f"D:{quality_score.depth:.2f} "
+                f"Cn:{quality_score.conciseness:.2f})"
+            )
 
     # Save results
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -185,7 +211,7 @@ async def run_experiments(
         )
 
         print(f"{strategy.value.upper()} Strategy:")
-        print(f"  Quality Score:     {avg_quality:.1f}/10")
+        print(f"  Quality Score:     {avg_quality:.2f}/5.00")
         print(f"  Avg Tokens Used:   {avg_tokens:.0f}/{total_budget}")
         print(f"  Avg Tool Calls:    {avg_tool_calls:.1f}")
         print(f"  Avg Duration:      {avg_duration:.1f}s")

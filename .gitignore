@@ -22,3 +22,4 @@ claude.md
 # Generated visualizations and reports
 experiments/results/*.png
 experiments/results/*.csv
+experiments/results/*.json
