@@ -81,16 +81,17 @@ async def run_experiments(
     # Strategies to test
     strategies = list(AllocationStrategy)
 
-    print(f"\nBudget: {total_budget} tokens per experiment")
+    print("\nBudgets (task-specific):")
+    print("  Simple: 1500 tokens")
+    print("  Moderate: 3000 tokens")
+    print("  Complex: 5000 tokens")
     print(f"Strategies: {[s.value for s in strategies]}")
     print(f"Tasks: {len(tasks)}")
     print(f"Total experiments: {len(strategies) * len(tasks)}")
     print(f"\n{'=' * 60}\n")
 
-    # Run experiment suite
-    suite = await runner.run_experiment_suite(
-        tasks=tasks, strategies=strategies, total_budget=total_budget
-    )
+    # Run experiment suite (now uses task-specific budgets)
+    suite = await runner.run_experiment_suite(tasks=tasks, strategies=strategies)
 
     # Evaluate responses using LLM-based pairwise comparison
     print(f"\n{'=' * 60}")

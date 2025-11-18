@@ -23,6 +23,7 @@ class ExperimentResult:
         question: The research question asked
         response: Agent's response
         metrics: Performance metrics
+        budget_limit: Token budget for this experiment
         success: Whether the experiment completed successfully
         error: Error message if failed
     """
@@ -32,8 +33,33 @@ class ExperimentResult:
     question: str
     response: str
     metrics: AgentMetrics
+    budget_limit: int
     success: bool = True
     error: str | None = None
+
+    @property
+    def within_budget(self) -> bool:
+        """Check if experiment stayed within budget (±10% tolerance).
+
+        Returns:
+            True if within budget, False if exceeded by >10%
+        """
+        if not self.success or not self.metrics:
+            return False
+        tolerance = 0.10  # 10% tolerance
+        max_allowed = self.budget_limit * (1 + tolerance)
+        return self.metrics.total_tokens_used <= max_allowed
+
+    @property
+    def budget_utilization(self) -> float:
+        """Calculate budget utilization percentage.
+
+        Returns:
+            Percentage of budget used (can exceed 100%)
+        """
+        if not self.success or not self.metrics:
+            return 0.0
+        return (self.metrics.total_tokens_used / self.budget_limit) * 100
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary format.
@@ -46,6 +72,9 @@ class ExperimentResult:
             "strategy": self.strategy,
             "question": self.question,
             "response": self.response,
+            "budget_limit": self.budget_limit,
+            "budget_utilization": self.budget_utilization,
+            "within_budget": self.within_budget,
             "success": self.success,
             "error": self.error,
             "metrics": self.metrics.to_dict() if self.metrics else None,
@@ -93,6 +122,14 @@ class ExperimentSuite:
         """
         return [r for r in self.results if r.success]
 
+    def get_within_budget_results(self) -> list[ExperimentResult]:
+        """Get only results that stayed within budget (±10% tolerance).
+
+        Returns:
+            List of results within budget
+        """
+        return [r for r in self.results if r.within_budget]
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary format.
 
@@ -133,19 +170,20 @@ class ExperimentRunner:
         self,
         task: ResearchTask,
         strategy: AllocationStrategy,
-        total_budget: int = 10000,
     ) -> ExperimentResult:
         """Run a single experiment with one task and strategy.
 
         Args:
-            task: Research task to execute
+            task: Research task to execute (includes recommended_budget)
             strategy: Allocation strategy to use
-            total_budget: Total token budget
 
         Returns:
             ExperimentResult with response and metrics
         """
         try:
+            # Use task's recommended budget for fair comparison
+            total_budget = task.recommended_budget
+
             # Create agent for this strategy
             agent = self.factory.create_agent(strategy, total_budget)
 
@@ -194,6 +232,7 @@ class ExperimentRunner:
                 question=task.question,
                 response=response,
                 metrics=metrics,
+                budget_limit=total_budget,
                 success=True,
             )
 
@@ -211,6 +250,7 @@ class ExperimentRunner:
                     total_tokens_used=0,
                     duration_seconds=0.0,
                 ),
+                budget_limit=task.recommended_budget,
                 success=False,
                 error=str(e),
             )
@@ -219,14 +259,12 @@ class ExperimentRunner:
         self,
         tasks: list[ResearchTask],
         strategies: list[AllocationStrategy] | None = None,
-        total_budget: int = 10000,
     ) -> ExperimentSuite:
         """Run a complete suite of experiments.
 
         Args:
-            tasks: List of research tasks to execute
+            tasks: List of research tasks to execute (each has recommended_budget)
             strategies: List of strategies to test (defaults to all)
-            total_budget: Total token budget per experiment
 
         Returns:
             ExperimentSuite with all results
@@ -240,13 +278,28 @@ class ExperimentRunner:
         # Run each task with each strategy
         for task in tasks:
             for strategy in strategies:
-                print(f"Running {task.id} with {strategy.value} strategy...")
-                result = await self.run_single_experiment(task, strategy, total_budget)
+                print(
+                    f"Running {task.id} with {strategy.value} strategy "
+                    f"(budget: {task.recommended_budget} tokens)..."
+                )
+                result = await self.run_single_experiment(task, strategy)
                 suite.add_result(result)
 
                 if result.success:
                     print(f"  ✓ Completed in {result.metrics.duration_seconds:.2f}s")
-                    print(f"    Tokens used: {result.metrics.total_tokens_used}")
+                    print(
+                        f"    Tokens used: {result.metrics.total_tokens_used}/{task.recommended_budget}"
+                    )
+
+                    # Warn if budget exceeded
+                    if result.metrics.total_tokens_used > task.recommended_budget:
+                        excess = (
+                            result.metrics.total_tokens_used - task.recommended_budget
+                        )
+                        excess_pct = (excess / task.recommended_budget) * 100
+                        print(
+                            f"    ⚠️  Exceeded budget by {excess} tokens ({excess_pct:.1f}%)"
+                        )
                 else:
                     print(f"  ✗ Failed: {result.error}")
 

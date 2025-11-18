@@ -17,6 +17,7 @@ class ResearchTask:
         complexity: Task complexity level (simple, moderate, complex)
         expected_tool_use: Expected number of tool calls for this task
         category: Task category (science, business, technology, etc.)
+        recommended_budget: Recommended total token budget for this task
     """
 
     id: str
@@ -24,11 +25,17 @@ class ResearchTask:
     complexity: str
     expected_tool_use: int
     category: str
+    recommended_budget: int
 
     def __repr__(self) -> str:
         """String representation of task."""
         return f"ResearchTask(id={self.id}, complexity={self.complexity}, category={self.category})"
 
+
+# Budget allocations by complexity
+BUDGET_SIMPLE = 2560  # Factual Q&A, definitions (min 512 reasoning for VERBOSE 20%)
+BUDGET_MODERATE = 3000  # Multi-part comparisons
+BUDGET_COMPLEX = 5000  # Deep analysis with multiple factors
 
 # Task catalog organized by complexity
 SIMPLE_TASKS = [
@@ -38,6 +45,7 @@ SIMPLE_TASKS = [
         complexity="simple",
         expected_tool_use=1,
         category="technology",
+        recommended_budget=BUDGET_SIMPLE,
     ),
     ResearchTask(
         id="simple_02",
@@ -45,6 +53,7 @@ SIMPLE_TASKS = [
         complexity="simple",
         expected_tool_use=1,
         category="science",
+        recommended_budget=BUDGET_SIMPLE,
     ),
     ResearchTask(
         id="simple_03",
@@ -52,6 +61,7 @@ SIMPLE_TASKS = [
         complexity="simple",
         expected_tool_use=1,
         category="technology",
+        recommended_budget=BUDGET_SIMPLE,
     ),
 ]
 
@@ -65,6 +75,7 @@ MODERATE_TASKS = [
         complexity="moderate",
         expected_tool_use=2,
         category="science",
+        recommended_budget=BUDGET_MODERATE,
     ),
     ResearchTask(
         id="moderate_02",
@@ -75,6 +86,7 @@ MODERATE_TASKS = [
         complexity="moderate",
         expected_tool_use=2,
         category="technology",
+        recommended_budget=BUDGET_MODERATE,
     ),
     ResearchTask(
         id="moderate_03",
@@ -85,6 +97,7 @@ MODERATE_TASKS = [
         complexity="moderate",
         expected_tool_use=2,
         category="technology",
+        recommended_budget=BUDGET_MODERATE,
     ),
 ]
 
@@ -99,6 +112,7 @@ COMPLEX_TASKS = [
         complexity="complex",
         expected_tool_use=3,
         category="economics",
+        recommended_budget=BUDGET_COMPLEX,
     ),
     ResearchTask(
         id="complex_02",
@@ -110,6 +124,7 @@ COMPLEX_TASKS = [
         complexity="complex",
         expected_tool_use=3,
         category="technology",
+        recommended_budget=BUDGET_COMPLEX,
     ),
     ResearchTask(
         id="complex_03",
@@ -121,6 +136,7 @@ COMPLEX_TASKS = [
         complexity="complex",
         expected_tool_use=3,
         category="healthcare",
+        recommended_budget=BUDGET_COMPLEX,
     ),
 ]
 
