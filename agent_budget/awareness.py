@@ -183,24 +183,40 @@ def create_planner_config(
     )
 
     # Create generation config
+    # NOTE: When include_thoughts=True, thoughts count against max_output_tokens
+    # So we need max_output_tokens = thinking_budget + answer_budget
     generate_config = types.GenerateContentConfig(
-        max_output_tokens=budget_config.output_tokens,
+        max_output_tokens=budget_config.total,  # Total budget for thoughts + answer
         temperature=0.2,  # Best practice for factual/reasoning tasks (reduces hallucinations)
     )
 
     return instruction, planner, generate_config
 
 
-# Standard budget levels for experiments
-BUDGET_TIGHT = TokenBudget(reasoning_tokens=1024, output_tokens=512)  # 1536 total
-BUDGET_MEDIUM = TokenBudget(reasoning_tokens=2048, output_tokens=1024)  # 3072 total
-BUDGET_GENEROUS = TokenBudget(reasoning_tokens=4096, output_tokens=2048)  # 6144 total
+# Standard budget levels for experiments (calibrated from pilot study)
+# Pilot showed mean usage: 363 reasoning / 73 output (436 total)
+# These budgets create meaningful constraints to test awareness effects
+
+BUDGET_TIGHT = TokenBudget(
+    reasoning_tokens=512,  # API minimum - binds on ~50% of questions
+    output_tokens=128,  # Forces conciseness
+)  # 640 total (1.47x pilot mean)
+
+BUDGET_MODERATE = TokenBudget(
+    reasoning_tokens=1024,  # 2x API minimum - comfortable for most
+    output_tokens=256,  # Above P75 pilot usage
+)  # 1280 total (2.93x pilot mean)
+
+BUDGET_COMFORTABLE = TokenBudget(
+    reasoning_tokens=2048,  # 4x API minimum - generous headroom
+    output_tokens=512,  # Well above pilot max (155)
+)  # 2560 total (5.87x pilot mean)
 
 # Map budget level names to configs
 BUDGET_LEVELS = {
     "tight": BUDGET_TIGHT,
-    "medium": BUDGET_MEDIUM,
-    "generous": BUDGET_GENEROUS,
+    "moderate": BUDGET_MODERATE,
+    "comfortable": BUDGET_COMFORTABLE,
 }
 
 

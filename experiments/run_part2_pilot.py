@@ -1,12 +1,13 @@
-"""Pilot study for Part 2: Budget Awareness Experiment.
+"""Part 2: Budget Awareness Experiment (Full Study).
 
-This script runs a pilot study testing whether explicit budget awareness
-improves agent performance on TruthfulQA questions.
+Tests whether explicit budget awareness improves agent performance
+across different budget constraints.
 
-Design:
-- 2 conditions: budget-aware vs budget-unaware
-- 1 budget level: medium (2048 reasoning / 1024 output)
-- 30 TruthfulQA questions
+Design (Between-Subjects):
+- 3 budget levels: tight (640), moderate (1280), comfortable (2560)
+- 2 awareness conditions: budget-aware vs budget-unaware
+- 6 total conditions × ~17 questions = 100 TruthfulQA questions
+- Stratified random assignment to balance difficulty
 - Objective correctness evaluation
 
 Usage:
@@ -28,13 +29,16 @@ from google.adk.tools import google_search
 from google.genai import types
 
 from agent_budget.awareness import (
-    BUDGET_MEDIUM,
+    BUDGET_COMFORTABLE,
+    BUDGET_MODERATE,
+    BUDGET_TIGHT,
     AwarenessCondition,
     create_planner_config,
 )
+from agent_budget.core import TokenBudget
 from agent_budget.monitor import AgentMetrics, UsageMonitor
 from experiments.evaluator_objective import ObjectiveEvaluator
-from experiments.tasks.truthful_qa_tasks import TruthfulQATask, get_pilot_sample
+from experiments.tasks.truthful_qa_tasks import TruthfulQATask
 
 
 @dataclass
@@ -56,6 +60,7 @@ class Part2Result:
 
     task_id: str
     condition: str
+    budget_level: str  # tight, moderate, or comfortable
     question: str
     response: str
     thinking_text: str  # Thinking tokens (internal reasoning)
@@ -71,6 +76,7 @@ class Part2Result:
         return {
             "task_id": self.task_id,
             "condition": self.condition,
+            "budget_level": self.budget_level,
             "question": self.question,
             "response": self.response,
             "thinking_text": self.thinking_text,
@@ -149,12 +155,16 @@ class Part2Runner:
         self,
         task: TruthfulQATask,
         condition: AwarenessCondition,
+        budget_config: TokenBudget,
+        budget_level: str,
     ) -> Part2Result:
         """Run a single experiment.
 
         Args:
             task: TruthfulQA task to run
             condition: Awareness condition to test
+            budget_config: Token budget configuration
+            budget_level: Budget level name (tight/moderate/comfortable)
 
         Returns:
             Part2Result with response and evaluation
@@ -162,7 +172,7 @@ class Part2Runner:
         try:
             # Create agent config with awareness condition
             instruction, planner, generate_config = create_planner_config(
-                condition=condition, budget_config=BUDGET_MEDIUM
+                condition=condition, budget_config=budget_config
             )
 
             # Create agent
@@ -229,6 +239,7 @@ class Part2Runner:
             return Part2Result(
                 task_id=task.id,
                 condition=condition.value,
+                budget_level=budget_level,
                 question=task.question,
                 response=response,
                 thinking_text=thinking_text,
@@ -243,6 +254,7 @@ class Part2Runner:
             return Part2Result(
                 task_id=task.id,
                 condition=condition.value,
+                budget_level=budget_level,
                 question=task.question,
                 response="",
                 thinking_text="",
@@ -260,71 +272,116 @@ class Part2Runner:
                 error=str(e),
             )
 
-    async def run_pilot(self) -> Part2Suite:
-        """Run pilot study with 30 questions × 2 conditions.
+    async def run_full_study(
+        self, n_questions: int = 100, seed: int = 42
+    ) -> Part2Suite:
+        """Run full Part 2 study with between-subjects design.
+
+        Args:
+            n_questions: Number of questions to test (default 100)
+            seed: Random seed for assignment
 
         Returns:
             Part2Suite with all results
         """
+        import random
+
+        random.seed(seed)
+
         suite = Part2Suite()
         suite.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Load pilot tasks
-        tasks = get_pilot_sample(seed=42)
+        # Load questions
+        from experiments.tasks.truthful_qa_tasks import TruthfulQALoader
 
-        # Run all conditions
-        conditions = [AwarenessCondition.UNAWARE, AwarenessCondition.AWARE]
+        loader = TruthfulQALoader()
+        tasks = loader.sample_stratified(n=n_questions, seed=seed)
 
-        for task in tasks:
-            for condition in conditions:
+        # Define all 6 conditions (3 budgets × 2 awareness)
+        budget_configs = [
+            ("tight", BUDGET_TIGHT),
+            ("moderate", BUDGET_MODERATE),
+            ("comfortable", BUDGET_COMFORTABLE),
+        ]
+        awareness_conditions = [AwarenessCondition.UNAWARE, AwarenessCondition.AWARE]
+
+        # Create all condition combinations
+        conditions = [
+            (budget_level, budget_config, awareness)
+            for budget_level, budget_config in budget_configs
+            for awareness in awareness_conditions
+        ]
+
+        # Randomly assign questions to conditions (between-subjects)
+        random.shuffle(tasks)
+        questions_per_condition = len(tasks) // len(conditions)
+
+        assignments = []
+        for i, (budget_level, budget_config, awareness) in enumerate(conditions):
+            start_idx = i * questions_per_condition
+            end_idx = (
+                start_idx + questions_per_condition
+                if i < len(conditions) - 1
+                else len(tasks)
+            )
+            assigned_tasks = tasks[start_idx:end_idx]
+
+            for task in assigned_tasks:
+                assignments.append((task, budget_level, budget_config, awareness))
+
+        # Run experiments
+        for i, (task, budget_level, budget_config, awareness) in enumerate(
+            assignments, 1
+        ):
+            print(
+                f"[{i}/{len(assignments)}] {task.id} | {awareness.value} | {budget_level} "
+                f"({budget_config.total} tokens)"
+            )
+
+            result = await self.run_single_experiment(
+                task=task,
+                condition=awareness,
+                budget_config=budget_config,
+                budget_level=budget_level,
+            )
+            suite.results.append(result)
+
+            if result.success:
                 print(
-                    f"Running {task.id} with {condition.value} condition "
-                    f"(budget: {BUDGET_MEDIUM.total} tokens)..."
+                    f"  ✓ {result.metrics.duration_seconds:.1f}s | "
+                    f"{result.metrics.total_tokens_used}/{budget_config.total} tokens | "
+                    f"score={result.correctness:.2f}"
                 )
-                result = await self.run_single_experiment(task, condition)
-                suite.results.append(result)
-
-                if result.success:
-                    print(f"  ✓ Completed in {result.metrics.duration_seconds:.2f}s")
-                    print(
-                        f"    Tokens: {result.metrics.total_tokens_used}/{BUDGET_MEDIUM.total}"
-                    )
-                    print(f"    Correctness: {result.correctness:.2f}")
-                else:
-                    print(f"  ✗ Failed: {result.error}")
+            else:
+                print(f"  ✗ Failed: {result.error}")
 
         suite.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         return suite
 
 
 async def main() -> None:
-    """Run pilot study."""
+    """Run full Part 2 study."""
     print("=" * 80)
-    print("PART 2 PILOT: Budget Awareness Study")
+    print("PART 2: Budget Awareness Study (Full)")
     print("=" * 80)
     print()
-    print("Research Question:")
-    print("  Does explicit budget awareness improve agent performance?")
-    print()
-    print("Design:")
-    print("  - Conditions: Budget-Aware vs Budget-Unaware")
-    print(
-        f"  - Budget: {BUDGET_MEDIUM.reasoning_tokens} reasoning / {BUDGET_MEDIUM.output_tokens} output"
-    )
-    print("  - Tasks: 30 TruthfulQA questions")
-    print("  - Evaluation: Objective correctness (0.0-1.0)")
+    print("Design: Between-Subjects")
+    print("  - 3 budget levels: tight (640), moderate (1280), comfortable (2560)")
+    print("  - 2 awareness conditions: aware vs unaware")
+    print("  - 6 conditions × ~17 questions = 100 TruthfulQA questions")
+    print("  - Stratified random assignment")
     print()
     print("=" * 80)
     print()
 
-    # Run pilot
+    # Run full study
     runner = Part2Runner()
-    suite = await runner.run_pilot()
+    suite = await runner.run_full_study(n_questions=100, seed=42)
 
     # Print summary
     print()
     print("=" * 80)
-    print("PILOT RESULTS SUMMARY")
+    print("PART 2 RESULTS SUMMARY")
     print("=" * 80)
     print()
 
@@ -333,25 +390,37 @@ async def main() -> None:
     print(f"Successful: {len(successful)}")
     print()
 
-    # Accuracy by condition
-    for condition in [AwarenessCondition.UNAWARE, AwarenessCondition.AWARE]:
-        cond_results = [r for r in successful if r.condition == condition.value]
-        if cond_results:
-            accuracy = sum(r.correctness for r in cond_results) / len(cond_results)
-            avg_tokens = sum(r.metrics.total_tokens_used for r in cond_results) / len(
-                cond_results
-            )
-            print(f"{condition.value.upper()}:")
-            print(f"  Accuracy: {accuracy:.2%}")
-            print(f"  Avg tokens: {avg_tokens:.0f}/{BUDGET_MEDIUM.total}")
-            print()
+    # Accuracy by condition (budget × awareness)
+    budget_levels = ["tight", "moderate", "comfortable"]
+    awareness_conditions = ["unaware", "aware"]
+
+    print("Results by Condition:")
+    print()
+    for budget in budget_levels:
+        print(f"{budget.upper()}:")
+        for awareness in awareness_conditions:
+            cond_results = [
+                r
+                for r in successful
+                if r.budget_level == budget and r.condition == awareness
+            ]
+            if cond_results:
+                accuracy = sum(r.correctness for r in cond_results) / len(cond_results)
+                avg_tokens = sum(
+                    r.metrics.total_tokens_used for r in cond_results
+                ) / len(cond_results)
+                print(
+                    f"  {awareness:10s}: {accuracy:5.1%} accuracy | "
+                    f"{avg_tokens:4.0f} avg tokens | n={len(cond_results)}"
+                )
+        print()
 
     # Save results
     output_dir = Path("experiments/results")
     output_dir.mkdir(exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    json_path = output_dir / f"part2_pilot_{timestamp}.json"
+    json_path = output_dir / f"part2_full_{timestamp}.json"
 
     with open(json_path, "w") as f:
         json.dump(suite.to_dict(), f, indent=2)
