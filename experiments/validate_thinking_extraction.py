@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from experiments.run_part2_pilot import Part2Runner
+from experiments.run_part1_full import Part1Runner
 from experiments.tasks.truthful_qa_tasks import get_pilot_sample
 
 
@@ -29,7 +29,7 @@ async def main() -> None:
     tasks = get_pilot_sample(seed=42)[:2]
 
     # Run experiments
-    runner = Part2Runner()
+    runner = Part1Runner()
     results = []
 
     for i, task in enumerate(tasks, 1):
@@ -37,10 +37,10 @@ async def main() -> None:
 
         # Test unaware condition
         print("  → unaware...", end=" ", flush=True)
-        from agent_budget.awareness import AwarenessCondition
+        from agent_budget.awareness import AwarenessCondition, BUDGET_MODERATE
 
         result_unaware = await runner.run_single_experiment(
-            task, AwarenessCondition.UNAWARE
+            task, AwarenessCondition.UNAWARE, BUDGET_MODERATE, "moderate"
         )
         results.append(result_unaware)
 
@@ -51,7 +51,7 @@ async def main() -> None:
         # Test aware condition
         print("  → aware...", end=" ", flush=True)
         result_aware = await runner.run_single_experiment(
-            task, AwarenessCondition.AWARE
+            task, AwarenessCondition.AWARE, BUDGET_MODERATE, "moderate"
         )
         results.append(result_aware)
 

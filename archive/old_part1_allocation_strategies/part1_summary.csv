@@ -1,0 +1,4 @@
+strategy,Tokens (Total),Tokens (Reasoning),Tokens (Output),Tool Calls,Duration (s),Quality (Overall),Quality (Accuracy),Quality (Complete),Quality (Clarity),Quality (Depth),Quality (Concise)
+balanced,2207.44,1201.22,1006.22,5.22,11.13,3.71,4.42,3.19,4.44,2.83,3.64
+deep,1926.11,1421.56,504.56,4.33,9.74,3.7,4.25,3.28,4.5,2.81,3.67
+verbose,2557.78,1047.0,1510.78,5.11,13.59,4.06,4.56,4.22,4.39,3.64,3.5

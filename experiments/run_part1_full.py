@@ -1,4 +1,4 @@
-"""Part 2: Budget Awareness Experiment (Full Study).
+"""Part 1: Budget Awareness Experiment (Full Study).
 
 Tests whether explicit budget awareness improves agent performance
 across different budget constraints.
@@ -11,7 +11,7 @@ Design (Between-Subjects):
 - Objective correctness evaluation
 
 Usage:
-    python -m experiments.run_part2_pilot
+    python -m experiments.run_part1_full
 """
 
 import asyncio
@@ -42,7 +42,7 @@ from experiments.tasks.truthful_qa_tasks import TruthfulQATask
 
 
 @dataclass
-class Part2Result:
+class Part1Result:
     """Results from a single Part 2 experiment.
 
     Attributes:
@@ -90,7 +90,7 @@ class Part2Result:
 
 
 @dataclass
-class Part2Suite:
+class Part1Suite:
     """Collection of Part 2 experiment results.
 
     Attributes:
@@ -99,15 +99,15 @@ class Part2Suite:
         completed_at: Suite completion timestamp
     """
 
-    results: list[Part2Result] = field(default_factory=list)
+    results: list[Part1Result] = field(default_factory=list)
     started_at: str | None = None
     completed_at: str | None = None
 
-    def get_by_condition(self, condition: str) -> list[Part2Result]:
+    def get_by_condition(self, condition: str) -> list[Part1Result]:
         """Get results for a specific condition."""
         return [r for r in self.results if r.condition == condition]
 
-    def get_successful(self) -> list[Part2Result]:
+    def get_successful(self) -> list[Part1Result]:
         """Get only successful results."""
         return [r for r in self.results if r.success]
 
@@ -142,7 +142,7 @@ class Part2Suite:
         }
 
 
-class Part2Runner:
+class Part1Runner:
     """Runner for Part 2 budget awareness experiments."""
 
     def __init__(self) -> None:
@@ -157,7 +157,7 @@ class Part2Runner:
         condition: AwarenessCondition,
         budget_config: TokenBudget,
         budget_level: str,
-    ) -> Part2Result:
+    ) -> Part1Result:
         """Run a single experiment.
 
         Args:
@@ -167,7 +167,7 @@ class Part2Runner:
             budget_level: Budget level name (tight/moderate/comfortable)
 
         Returns:
-            Part2Result with response and evaluation
+            Part1Result with response and evaluation
         """
         try:
             # Create agent config with awareness condition
@@ -188,11 +188,11 @@ class Part2Runner:
             # Create runner
             runner = Runner(
                 agent=agent,
-                app_name="part2_pilot",
+                app_name="part1_pilot",
                 session_service=self.session_service,
             )
             session = await runner.session_service.create_session(
-                app_name="part2_pilot", user_id="researcher"
+                app_name="part1_pilot", user_id="researcher"
             )
 
             # Run task
@@ -236,7 +236,7 @@ class Part2Runner:
             # Evaluate correctness
             eval_result = self.evaluator.evaluate_correctness(task, response)
 
-            return Part2Result(
+            return Part1Result(
                 task_id=task.id,
                 condition=condition.value,
                 budget_level=budget_level,
@@ -251,7 +251,7 @@ class Part2Runner:
             )
 
         except Exception as e:
-            return Part2Result(
+            return Part1Result(
                 task_id=task.id,
                 condition=condition.value,
                 budget_level=budget_level,
@@ -274,7 +274,7 @@ class Part2Runner:
 
     async def run_full_study(
         self, n_questions: int = 100, seed: int = 42
-    ) -> Part2Suite:
+    ) -> Part1Suite:
         """Run full Part 2 study with between-subjects design.
 
         Args:
@@ -282,13 +282,13 @@ class Part2Runner:
             seed: Random seed for assignment
 
         Returns:
-            Part2Suite with all results
+            Part1Suite with all results
         """
         import random
 
         random.seed(seed)
 
-        suite = Part2Suite()
+        suite = Part1Suite()
         suite.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Load questions
@@ -362,7 +362,7 @@ class Part2Runner:
 async def main() -> None:
     """Run full Part 2 study."""
     print("=" * 80)
-    print("PART 2: Budget Awareness Study (Full)")
+    print("PART 1: Budget Awareness Study (Full)")
     print("=" * 80)
     print()
     print("Design: Between-Subjects")
@@ -375,13 +375,13 @@ async def main() -> None:
     print()
 
     # Run full study
-    runner = Part2Runner()
+    runner = Part1Runner()
     suite = await runner.run_full_study(n_questions=100, seed=42)
 
     # Print summary
     print()
     print("=" * 80)
-    print("PART 2 RESULTS SUMMARY")
+    print("PART 1 RESULTS SUMMARY")
     print("=" * 80)
     print()
 
@@ -420,7 +420,7 @@ async def main() -> None:
     output_dir.mkdir(exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    json_path = output_dir / f"part2_full_{timestamp}.json"
+    json_path = output_dir / f"part1_full_{timestamp}.json"
 
     with open(json_path, "w") as f:
         json.dump(suite.to_dict(), f, indent=2)

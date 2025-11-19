@@ -1,4 +1,4 @@
-# Part 2: Budget Awareness Effect
+# Part 1: Budget Awareness Effect
 ## Comprehensive Research Report
 
 **Study Period**: November 19, 2025
@@ -581,8 +581,8 @@ for part in event.content.parts:
 ### 10.1 Data Files
 
 **Results**:
-- `experiments/results/part2_full_20251119_200701.json` (Run 1, n=100)
-- `experiments/results/part2_full_20251119_211658.json` (Run 2, n=100)
+- `experiments/results/part1_full_20251119_200701.json` (Run 1, n=100)
+- `experiments/results/part1_full_20251119_211658.json` (Run 2, n=100)
 
 **Each file contains**:
 - Raw responses (thinking text + final answer)
@@ -596,11 +596,11 @@ for part in event.content.parts:
 - `agent_budget/awareness.py` - Budget awareness conditions and instructions
 
 **Experiment Runner**:
-- `experiments/run_part2_pilot.py` - Main experiment script
+- `experiments/run_part1_full.py` - Main experiment script
 
 **Analysis**:
-- `experiments/analyze_part2_full.py` - Per-run analysis with bootstrap CIs
-- `experiments/analyze_part2_combined.py` - Pooled analysis of both runs
+- `experiments/analyze_part1_full.py` - Per-run analysis with bootstrap CIs
+- `experiments/analyze_part1_combined.py` - Pooled analysis of both runs
 
 **Tasks**:
 - `experiments/tasks/truthful_qa_tasks.py` - TruthfulQA dataset interface

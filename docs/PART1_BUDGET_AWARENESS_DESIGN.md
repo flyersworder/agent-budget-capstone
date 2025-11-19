@@ -1,4 +1,4 @@
-# Part 2: Budget Awareness Study Design
+# Part 1: Budget Awareness Study Design
 
 ## Research Question
 
@@ -6,7 +6,7 @@
 
 ## Motivation
 
-From Part 1, we discovered that:
+From preliminary exploration, we discovered that:
 1. **Agents are NOT aware of their configured budgets** (thinking_budget, max_output_tokens)
 2. These parameters are API-level constraints, not communicated to the model
 3. Agents cannot optimize their resource allocation without explicit instructions
@@ -302,7 +302,7 @@ The study succeeds if:
 1. Create `experiments/tasks/truthful_qa_tasks.py` - Dataset loader
 2. Create `agent_budget/awareness.py` - Budget awareness configs
 3. Create `experiments/evaluator_objective.py` - Correctness evaluator
-4. Create `experiments/run_part2_pilot.py` - Pilot runner
+4. Create `experiments/run_part1_full.py` - Pilot runner
 5. Run pilot and validate approach
 
 ---

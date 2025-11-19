@@ -1,294 +1,106 @@
 # Agent Token Budget Research
 
-Research project investigating how AI agents allocate and utilize token budgets between reasoning (extended thinking) and output generation.
+Research project investigating how AI agents respond to computational budget constraints, specifically focusing on budget awareness and multi-agent coordination.
 
 ## Research Questions
 
-1. **How do different token allocation strategies affect agent performance?**
-   - Deep Thinker (80/20): More reasoning, concise output
-   - Balanced (50/50): Equal allocation
-   - Verbose (20/80): Less reasoning, detailed output
+### Part 1: Budget Awareness (COMPLETED ✅)
+**Does explicit budget awareness improve agent performance?**
 
-2. **Are agents aware of their budget constraints?**
-   - Do they actively manage token allocation?
-   - Can they optimize for their specific constraints?
+**Answer**: **NO** - Budget awareness significantly **hurts** performance (-12.9pp accuracy, p=0.028)
 
-3. **How does task complexity affect budget utilization?**
-   - Simple tasks vs. complex analytical tasks
-   - When does extended thinking provide value?
+Key findings:
+- Aware agents use 47% MORE reasoning tokens but achieve 12.9pp LOWER accuracy
+- Effect is statistically significant and replicates across independent trials
+- Evidence of "budget awareness overhead" - meta-cognitive load reduces task performance
 
-## Key Findings
+See `PART1_COMPREHENSIVE_REPORT.md` for full results.
 
-### Budget Awareness Discovery
+### Part 2: Multi-Agent Coordination (IN PROGRESS 🚧)
+**Can multi-agent systems with coordination overcome the budget awareness paradox?**
 
-Through empirical testing, we discovered that **agents are NOT aware of their configured budgets**:
+Planned conditions:
+- (a) Multi-agent without budget awareness (baseline)
+- (b) Multi-agent with overall budget awareness only
+- (c) Multi-agent with overall + individual budget awareness
+- (d) Multi-agent with overall budget awareness + negotiation
+
+## Key Technical Discovery
+
+**Agents are NOT aware of their configured budgets by default**:
 
 #### Extended Thinking Budget (`thinking_budget`)
 - **Configuration**: Set via `ThinkingConfig` in `BuiltInPlanner`
 - **Agent Awareness**: ❌ **None** - The model cannot access this value
 - **Function**: **Soft API constraint** that guides generation (can be exceeded)
-- **How It Works**: Passed to Gemini API, influences generation process internally (like temperature or top_p)
 - **Minimum Value**: **512 tokens** (API constraint for Gemini models)
-- **Behavior**: When asked about constraints, agents search Google for generic Gemini specs
-- **Can Exceed**: Yes - budget is a guideline, not a hard cutoff
 
 #### Output Token Budget (`max_output_tokens`)
 - **Configuration**: Set via `GenerateContentConfig`
 - **Agent Awareness**: ❌ **None** - The model cannot access this value
 - **Function**: **Hard API constraint** that truncates output generation
-- **How It Works**: Stops generation when limit is reached
-- **Behavior**: When asked, agents report generic model limits (e.g., "65,535 tokens"), not their specific allocation
-
-**Evidence**: Created test scripts that directly asked agents about their budgets. All agents:
-1. Had no knowledge of their specific allocations
-2. Used Google Search to find generic Gemini model specifications
-3. Never mentioned their configured values (e.g., 2400, 1500, 600 tokens)
+- **CRITICAL**: When `include_thoughts=True`, thinking tokens count against this limit!
 
 **How Budgets Actually Work**:
-The key distinction is between API-level constraints and agent-level knowledge:
 
-| Aspect | API-Level (thinking_budget, max_output_tokens) | Agent-Level (Instructions) |
-|--------|----------------------------------------------|---------------------------|
-| **Visibility** | Hidden from model | Explicitly communicated |
+| Aspect | API-Level Constraints | Agent-Level Knowledge |
+|--------|----------------------|----------------------|
+| **Visibility** | Hidden from model | Must be explicitly communicated |
 | **Influence** | Affects generation process | Affects reasoning strategy |
 | **Analogy** | Like temperature or top_p | Like system prompts |
-| **Purpose** | Technical constraint | Strategic guidance |
-
-**Why Budget-Aware Instructions Matter**:
-- Without instructions: Agent doesn't know or optimize for budgets
-- With instructions: Agent can make strategic resource allocation decisions
-- Combined approach: API constraints + explicit instructions = best results
-
-### Minimum Budget Requirements
-
-| Strategy | Reasoning Allocation | Minimum Total Budget |
-|----------|---------------------|---------------------|
-| Deep (80/20) | 80% | 640 tokens (512 ÷ 0.8) |
-| Balanced (50/50) | 50% | 1,024 tokens (512 ÷ 0.5) |
-| Verbose (20/80) | 20% | **2,560 tokens** (512 ÷ 0.2) |
-
-**Recommendation**: Use minimum total budget of **3,000 tokens** to accommodate all strategies with headroom.
-
-### Task Complexity Impact
-
-Simple factual questions (e.g., "What is quantum computing?") don't trigger significant extended thinking:
-- **Observed**: Even with 4000-token reasoning budget, agents used only 47-652 tokens
-- **Reason**: Information retrieval tasks don't require deep reasoning
-- **Implication**: Need complex analytical tasks to see meaningful strategy differentiation
-
-## Research Design Considerations
-
-### Current Approach (Implicit Budgets)
-
-**Setup**: Budgets are API constraints; agents receive only vague instructions
-```python
-"deep": "You are a research assistant that thinks deeply before acting..."
-"balanced": "You are a research assistant with balanced thinking and output..."
-"verbose": "You are a research assistant that provides detailed explanations..."
-```
-
-**Pros**:
-- Realistic - reflects real-world API usage
-- Tests emergent behavior
-- Mirrors how LLMs are typically deployed
-
-**Cons**:
-- Agents don't actively optimize for allocations
-- Strategies may not differentiate meaningfully
-- Results heavily task-dependent
-
-### Alternative Approach (Explicit Budgets)
-
-**Setup**: Tell agents their specific allocations in instructions
-```python
-"deep": f"You have {reasoning_tokens} tokens for thinking and {output_tokens} for output.
-         Maximize your thinking budget for deep analysis, keep responses concise."
-```
-
-**Pros**:
-- Agents actively manage resources
-- Clear differentiation between strategies
-- Tests budgeted decision-making
-
-**Cons**:
-- Less realistic deployment scenario
-- May not reflect typical LLM usage patterns
-- Introduces meta-reasoning about budgets
-
-## Recommended Experiment Design
-
-### Option A: Budget-Aware Agents (Recommended)
-
-**Rationale**: The research question is about token allocation strategies. To meaningfully test this, agents should know and optimize for their constraints.
-
-**Implementation**:
-1. Update agent instructions to include specific budget information
-2. Encourage agents to use reasoning budget strategically
-3. Provide guidance on output conciseness vs. detail
-
-**Example**:
-```python
-instructions = {
-    "deep": (
-        f"You have {reasoning_tokens} tokens for internal reasoning and "
-        f"{output_tokens} tokens for your response. Use your generous "
-        "reasoning budget to think deeply and plan carefully. Provide "
-        "concise, insightful outputs that reflect your thorough analysis."
-    ),
-    "balanced": (
-        f"You have {reasoning_tokens} tokens for reasoning and "
-        f"{output_tokens} tokens for output. Balance your thinking and "
-        "response detail appropriately for the task."
-    ),
-    "verbose": (
-        f"You have {reasoning_tokens} tokens for reasoning and "
-        f"{output_tokens} tokens for output. Focus on detailed, comprehensive "
-        "responses. Use your large output budget to provide thorough explanations."
-    ),
-}
-```
-
-### Option B: Hybrid Approach
-
-**Rationale**: Test both conditions to understand the impact of budget awareness
-
-**Implementation**:
-1. Run Part 1A: Implicit budgets (current approach)
-2. Run Part 1B: Explicit budgets (budget-aware)
-3. Compare results to understand awareness impact
 
 ## Project Structure
 
 ```
 agent-budget-capstone/
-├── agent_budget/              # Core agent implementation
+├── agent_budget/              # Core implementation
 │   ├── core.py                # Token budget definitions
-│   ├── agent_factory.py       # Agent creation with strategies
-│   └── monitor.py             # Usage tracking (thoughts_token_count)
+│   ├── agent_factory.py       # Agent creation (old Part 1 - archived)
+│   ├── awareness.py           # Budget awareness conditions (Part 1)
+│   └── monitor.py             # Usage tracking
 ├── experiments/               # Experiment runners
-│   ├── run_part1.py           # Main experiment CLI
-│   ├── run_pilot.py           # Pilot study runner
-│   ├── runner.py              # Experiment orchestration
-│   ├── evaluator.py           # Response quality evaluation
-│   └── tasks/                 # Research task definitions
-│       └── research_tasks.py  # 9 tasks (simple, moderate, complex)
-├── notebooks/                 # Analysis notebooks
-│   └── part1_analysis.ipynb   # Visualization and analysis
-└── tests/                     # Unit tests
+│   ├── run_part1_full.py      # Part 1: Budget awareness study
+│   ├── analyze_part1_full.py  # Per-run statistical analysis
+│   ├── analyze_part1_combined.py  # Pooled analysis (n=200)
+│   ├── evaluator_objective.py # LLM-as-judge for correctness
+│   └── tasks/
+│       └── truthful_qa_tasks.py  # TruthfulQA dataset integration
+├── docs/                      # Study designs
+│   └── PART1_BUDGET_AWARENESS_DESIGN.md
+├── archive/                   # Archived studies
+│   └── old_part1_allocation_strategies/  # Original allocation study
+└── PART1_COMPREHENSIVE_REPORT.md  # Full research report
 ```
 
-## LLM-as-a-Judge Evaluation System
+## Part 1 Study Design
 
-**Critical Research Component**: This project uses a state-of-the-art LLM-based evaluator implementing best practices from 2024-2025 research.
+**Type**: Between-subjects factorial design (n=200)
 
-### Key Features
+**Factors**:
+- Budget Awareness: 2 levels (Unaware, Aware)
+- Budget Size: 3 levels (Tight: 640, Moderate: 1280, Comfortable: 2560)
 
-1. **Pairwise Comparison** - More reliable than absolute scoring
-2. **Position Bias Mitigation** - Swaps response order and averages scores (eliminates 60-69% bias)
-3. **Chain-of-Thought Reasoning** - LLM explains its evaluation before scoring
-4. **Detailed Rubrics** - Clear 1-5 scale for each dimension
-5. **Multi-Dimensional Analysis** - Evaluates 5 dimensions:
-   - **Accuracy**: Factual correctness and reliability
-   - **Completeness**: Addresses all aspects of the question
-   - **Clarity**: Clear, well-organized communication
-   - **Depth**: Analytical insight and thoughtful analysis
-   - **Conciseness**: Information density (value per word, NOT brevity alone)
-
-### Why This Matters
-
-The old heuristic evaluator had critical flaws:
-- **Length bias** - Systematically favored verbose responses
-- **No factual accuracy** - Couldn't tell if answers were correct
-- **Contradicted research goals** - "Deep thinker" (concise) scored lower than "verbose" (lengthy)
-
-The new LLM evaluator:
-- Measures **quality**, not quantity
-- Evaluates **insight**, not word count
-- Uses **research-validated** bias mitigation techniques
-
-### Evaluation Methodology
-
-For each research task, the evaluator:
-1. Compares all 3 strategies pairwise (deep vs balanced, balanced vs verbose, deep vs verbose)
-2. Swaps position order for each pair (6 total LLM calls per task)
-3. Averages scores to mitigate position bias
-4. Provides chain-of-thought reasoning for each dimension
-5. Outputs confidence levels based on score consistency
-
-See `LLM_JUDGE_DESIGN.md` for complete research background and design rationale.
-
-### Validation
-
-Run validation tests to verify evaluator correctness:
-```bash
-uv run python test_llm_evaluator.py
-```
-
-Tests include:
-- Sanity check (clearly good vs bad responses)
-- Conciseness vs verbosity (information density)
-- Position bias consistency
-- Round-robin ranking
+**Evaluation**:
+- Dataset: TruthfulQA (factual question-answering)
+- Metric: Objective correctness via LLM-as-judge
+- Model: Gemini 2.5 Flash Lite with extended thinking
 
 ## Running Experiments
 
-### Quick Test
+### Part 1: Budget Awareness Study
 ```bash
-# Test with one simple task
-uv run python -m experiments.run_part1 --test
+# Run full study (100 questions, between-subjects design)
+uv run python -m experiments.run_part1_full
 
-# Test with smaller budget
-uv run python -m experiments.run_part1 --test --budget 3000
+# Analyze results (per-run analysis with bootstrap CIs)
+uv run python -m experiments.analyze_part1_full
 
-# Test specific task
-uv run python -m experiments.run_part1 --task-id complex_01
+# Pooled analysis across both runs (n=200)
+uv run python -m experiments.analyze_part1_combined
 ```
 
-### Full Experiment
-```bash
-# Run all 9 tasks with all strategies
-uv run python -m experiments.run_part1 --budget 10000
-```
-
-### Analysis
-```bash
-# Install analysis dependencies
-uv sync --group analysis
-
-# Launch Jupyter
-uv run jupyter lab
-
-# Open notebooks/part1_analysis.ipynb
-```
-
-## Technical Notes
-
-### Token Tracking
-
-**Reasoning tokens**: Tracked via `thoughts_token_count` in `usage_metadata`
-```python
-thinking = getattr(event.usage_metadata, "thoughts_token_count", 0)
-```
-
-**Output tokens**: Tracked via `candidates_token_count` in `usage_metadata`
-```python
-output = getattr(event.usage_metadata, "candidates_token_count", 0)
-```
-
-### Google Search Tool
-
-The `google_search` tool is a **grounding feature**, not a traditional function-calling tool:
-- Operates internally within Gemini models
-- Tracked via `grounding_metadata.web_search_queries`
-- Tokens tracked via `tool_use_prompt_token_count`
-
-## Next Steps
-
-1. **Decide on budget awareness approach** (Option A or B)
-2. Update agent instructions accordingly
-3. Run full experiment suite with all 9 tasks
-4. Analyze results with Jupyter notebook
-5. Document findings and insights
+### Part 2: Multi-Agent Study (Coming Soon)
+Design in progress...
 
 ## Dependencies
 
@@ -297,8 +109,25 @@ The `google_search` tool is a **grounding feature**, not a traditional function-
 uv add google-adk python-dotenv
 
 # Analysis
-uv sync --group analysis  # pandas, matplotlib, seaborn, jupyter
+uv add --group analysis scipy numpy pandas
 
 # Development
-uv sync --group dev  # pre-commit
+uv sync --group dev  # pre-commit hooks
+```
+
+## Key Files
+
+- `PART1_COMPREHENSIVE_REPORT.md` - Complete Part 1 research report
+- `docs/PART1_BUDGET_AWARENESS_DESIGN.md` - Study design and hypotheses
+- `agent_budget/awareness.py` - Budget awareness implementation
+- `experiments/results/` - Raw experimental data
+
+## Citation
+
+If you use this research, please cite:
+
+```
+Budget Awareness Paradox in LLM Agents (2025)
+Experimental evidence that explicit budget constraints reduce agent performance
+Gemini 2.5 Flash Lite with Extended Thinking on TruthfulQA
 ```

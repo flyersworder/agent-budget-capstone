@@ -1,4 +1,4 @@
-"""Comprehensive statistical analysis of Part 2 full study results.
+"""Comprehensive statistical analysis of Part 1 full study results.
 
 Includes:
 - Descriptive statistics by condition
@@ -273,7 +273,7 @@ def main() -> None:
     """Run comprehensive analysis."""
     # Load results
     results_dir = Path("experiments/results")
-    results_files = sorted(results_dir.glob("part2_full_*.json"))
+    results_files = sorted(results_dir.glob("part1_full_*.json"))
 
     if not results_files:
         print("No full study results found!")

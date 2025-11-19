@@ -1,4 +1,4 @@
-"""Combined analysis of both Part 2 full runs.
+"""Combined analysis of both Part 1 full runs.
 
 Analyzes both independent runs together for:
 - Pooled statistical tests
@@ -18,8 +18,8 @@ def load_both_runs() -> list[dict[str, Any]]:
     """Load both full study runs."""
     results_dir = Path("experiments/results")
 
-    run1 = results_dir / "part2_full_20251119_200701.json"
-    run2 = results_dir / "part2_full_20251119_211658.json"
+    run1 = results_dir / "part1_full_20251119_200701.json"
+    run2 = results_dir / "part1_full_20251119_211658.json"
 
     with open(run1) as f:
         data1: dict[str, Any] = json.load(f)
