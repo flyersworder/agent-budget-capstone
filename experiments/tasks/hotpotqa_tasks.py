@@ -217,6 +217,92 @@ def get_bridge_sample(
     return random.sample(pool, min(n, len(pool)))
 
 
+def get_factorial_sample(
+    n_per_difficulty: int = 25, seed: int = 42
+) -> dict[str, list[HotpotQATask]]:
+    """Get samples for 2×4 factorial design with EASY and HARD difficulty levels.
+
+    DEPRECATED: Uses question length as difficulty proxy (flawed).
+    Use get_supporting_facts_sample() instead for valid complexity moderator.
+
+    Args:
+        n_per_difficulty: Number of questions per difficulty level
+        seed: Random seed for reproducibility
+
+    Returns:
+        Dict with keys "EASY" and "HARD", each containing list of tasks
+    """
+    return {
+        "EASY": get_bridge_sample(n=n_per_difficulty, easier_half=True, seed=seed),
+        "HARD": get_bridge_sample(n=n_per_difficulty, easier_half=False, seed=seed + 1),
+    }
+
+
+def get_supporting_facts_sample(
+    n_per_complexity: int = 25, seed: int = 42
+) -> dict[str, list[HotpotQATask]]:
+    """Get samples for 2×4 factorial design stratified by reasoning chain length.
+
+    Uses ground-truth number of supporting facts from HotpotQA dataset:
+    - SIMPLE: 2 supporting facts (shortest reasoning chain A→B)
+    - COMPLEX: 3 supporting facts (longer reasoning chain A→B→C)
+
+    This is a valid pre-existing moderator (labeled by dataset creators),
+    theoretically meaningful for multi-agent coordination complexity.
+
+    Args:
+        n_per_complexity: Number of questions per complexity level
+        seed: Random seed for reproducibility
+
+    Returns:
+        Dict with keys "SIMPLE" and "COMPLEX", each containing list of tasks
+    """
+    # Load dataset with supporting facts information
+    from datasets import load_dataset
+
+    ds = load_dataset("hotpot_qa", "distractor", cache_dir=None)
+    validation = ds["validation"]
+
+    # Set random seed
+    if seed is not None:
+        random.seed(seed)
+
+    # Separate by number of supporting facts (only bridge questions)
+    simple_tasks = []  # 2 supporting facts
+    complex_tasks = []  # 3 supporting facts
+
+    for item in validation:
+        if item["type"] != "bridge":
+            continue
+
+        n_facts = len(item["supporting_facts"]["title"])
+
+        task = HotpotQATask(
+            id=item["id"],
+            question=item["question"],
+            answer=item["answer"],
+            question_type=item["type"],
+            level=item["level"],
+        )
+
+        if n_facts == 2:
+            simple_tasks.append(task)
+        elif n_facts == 3:
+            complex_tasks.append(task)
+
+    # Sample from each pool
+    n_simple = min(n_per_complexity, len(simple_tasks))
+    n_complex = min(n_per_complexity, len(complex_tasks))
+
+    sampled_simple = random.sample(simple_tasks, n_simple)
+    sampled_complex = random.sample(complex_tasks, n_complex)
+
+    return {
+        "SIMPLE": sampled_simple,
+        "COMPLEX": sampled_complex,
+    }
+
+
 if __name__ == "__main__":
     # Test the loader
     print("Loading HotpotQA dataset...")
