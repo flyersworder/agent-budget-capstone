@@ -179,6 +179,44 @@ def get_main_sample(n: int = 20, seed: int = 42) -> list[HotpotQATask]:
     return loader.sample_balanced(n=n, seed=seed)
 
 
+def get_bridge_sample(
+    n: int = 10, easier_half: bool = True, seed: int = 42
+) -> list[HotpotQATask]:
+    """Get sample of bridge questions only.
+
+    Uses question length as a heuristic for difficulty - shorter questions
+    tend to be simpler single-hop bridges, while longer questions involve
+    more complex multi-hop reasoning.
+
+    Args:
+        n: Number of bridge questions to sample
+        easier_half: If True, sample from shorter questions (simpler)
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of bridge HotpotQATask objects
+    """
+    loader = HotpotQALoader()
+    bridge_tasks = loader.get_by_type("bridge")
+
+    # Sort by question length
+    bridge_tasks_sorted = sorted(bridge_tasks, key=lambda t: len(t.question))
+
+    # Take easier or harder half
+    if easier_half:
+        # Take first half (shorter questions)
+        pool = bridge_tasks_sorted[: len(bridge_tasks_sorted) // 2]
+    else:
+        # Take second half (longer questions)
+        pool = bridge_tasks_sorted[len(bridge_tasks_sorted) // 2 :]
+
+    # Sample from pool
+    if seed is not None:
+        random.seed(seed)
+
+    return random.sample(pool, min(n, len(pool)))
+
+
 if __name__ == "__main__":
     # Test the loader
     print("Loading HotpotQA dataset...")

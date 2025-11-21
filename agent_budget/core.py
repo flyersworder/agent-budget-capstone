@@ -65,7 +65,9 @@ class MultiAgentAwarenessCondition(Enum):
     NO_AWARENESS = "no_awareness"  # Baseline: no budget information
     OVERALL_ONLY = "overall_only"  # Know total team budget only
     OVERALL_AND_INDIVIDUAL = "overall_and_individual"  # Know total + own allocation
-    WITH_NEGOTIATION = "with_negotiation"  # Can request additional budget
+    NEGOTIATION_AWARENESS = (
+        "negotiation_awareness"  # Aware of negotiation, can discuss budget needs
+    )
 
 
 @dataclass
@@ -229,7 +231,7 @@ class MultiAgentBudgetConfig:
         )
 
     @staticmethod
-    def create_with_negotiation(
+    def create_negotiation_awareness(
         total_budget: int,
         initial_allocation_pct: float = 0.6,
     ) -> "MultiAgentBudgetConfig":
@@ -270,7 +272,7 @@ class MultiAgentBudgetConfig:
             total_budget=total_budget,
             allocations=allocations,
             reserve_pool=reserve,
-            awareness_condition=MultiAgentAwarenessCondition.WITH_NEGOTIATION,
+            awareness_condition=MultiAgentAwarenessCondition.NEGOTIATION_AWARENESS,
         )
 
 
@@ -364,7 +366,7 @@ class IterativeTeamConfig:
         )
 
     @staticmethod
-    def create_with_negotiation(
+    def create_negotiation_awareness(
         total_budget: int = 2000,
         initial_allocation_pct: float = 0.80,
     ) -> "IterativeTeamConfig":
@@ -404,5 +406,5 @@ class IterativeTeamConfig:
             validator_budget=validator_budget,
             max_iterations=3,
             reserve_pool=reserve,
-            awareness_condition=MultiAgentAwarenessCondition.WITH_NEGOTIATION,
+            awareness_condition=MultiAgentAwarenessCondition.NEGOTIATION_AWARENESS,
         )

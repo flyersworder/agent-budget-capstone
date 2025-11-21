@@ -13,7 +13,7 @@ from typing import Any
 from dotenv import load_dotenv
 from google.adk.agents import Agent, LlmAgent, LoopAgent, SequentialAgent
 from google.adk.planners import BuiltInPlanner
-from google.adk.tools import google_search
+from google.adk.tools import FunctionTool, google_search
 from google.adk.tools.tool_context import ToolContext
 from google.genai import types
 
@@ -96,6 +96,10 @@ def request_budget(
         )
 
         return {"approved": False, "allocated": 0, "reason": reason}
+
+
+# Wrap request_budget in FunctionTool for ADK compatibility
+request_budget_tool = FunctionTool(func=request_budget)
 
 
 # ============================================================================
@@ -214,7 +218,7 @@ Optimize your work within YOUR allocation.
 {base_instruction}
 </role>"""
 
-    else:  # WITH_NEGOTIATION
+    else:  # NEGOTIATION_AWARENESS
         # Can request additional budget
         return f"""<team_budget>
 Your team has a total budget of {team_config.total_budget} tokens.
@@ -254,70 +258,101 @@ def _create_researcher_instruction(team_config: IterativeTeamConfig) -> str:
     condition = team_config.awareness_condition
     budget = team_config.researcher_budget
 
-    base = """<role>
-You are the RESEARCHER in a 2-agent iterative team.
+    # Persona
+    persona = """<persona>
+You are the RESEARCHER in a 2-agent iterative collaboration team.
+Your role is to gather evidence and propose well-reasoned answers.
+</persona>"""
 
-Your task:
-1. Use google_search to gather information and evidence
-2. Propose an answer with clear reasoning
-3. If you receive feedback from the Validator, revise your answer accordingly
+    # Task description
+    task = """<task>
+1. Use google_search to find relevant information and evidence
+2. Analyze the evidence and propose an answer with clear reasoning
+3. If the Validator provides feedback, carefully consider it and revise your answer
+4. Continue iterating until the Validator approves or maximum rounds are reached
+</task>"""
 
-Output format:
-- Round 1: "Based on [evidence], I propose the answer is [X] because [reasoning]"
-- Round N: "Based on feedback, I revise my answer to [Y] because [new reasoning]"
+    # Iteration awareness
+    iteration = f"""<iteration_context>
+This is an iterative process with up to {team_config.max_iterations} rounds.
+- You can see the round number from the conversation history
+- Round 1: Your first proposal
+- Round 2+: Revisions based on Validator feedback
+- The Validator will respond with either approval (starting with "APPROVED") or constructive feedback
+</iteration_context>"""
 
-Important: Provide detailed reasoning so the Validator can verify your work.
-</role>"""
+    # Output format
+    output_format = """<output_format>
+Provide your response in this structure:
 
-    # Add budget awareness
+**Round 1 (Initial Proposal):**
+"Based on [specific evidence from search], I propose the answer is [X] because [clear reasoning connecting evidence to answer]."
+
+**Round 2+ (Revisions):**
+"Based on the Validator's feedback about [specific concern], I have [searched for new evidence / reconsidered my reasoning]. I now propose [revised answer] because [updated reasoning]."
+
+Always include:
+- Specific evidence sources
+- Clear logical reasoning
+- Acknowledgment of Validator feedback (if any)
+</output_format>"""
+
+    # Budget awareness (varies by condition)
     if condition == MultiAgentAwarenessCondition.NO_AWARENESS:
-        return base
+        constraints = ""
 
     elif condition == MultiAgentAwarenessCondition.OVERALL_ONLY:
-        return f"""<team_budget>
-Your 2-agent team has {team_config.total_budget} tokens TOTAL across up to {team_config.max_iterations} rounds.
-Use resources efficiently - unnecessary iterations waste budget.
-</team_budget>
+        constraints = f"""<constraints>
+<budget_awareness>
+Your 2-agent team has a TOTAL budget of {team_config.total_budget} tokens for this task.
+This budget is shared across both agents (Researcher and Validator) and all {team_config.max_iterations} rounds.
 
-{base}"""
+Efficiency matters:
+- Unnecessary iterations consume team budget
+- Aim for accurate answers in fewer rounds when reasonable
+</budget_awareness>
+</constraints>"""
 
     elif condition == MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL:
-        return f"""<team_budget>
-Your team has {team_config.total_budget} tokens total across up to {team_config.max_iterations} rounds.
-</team_budget>
+        constraints = f"""<constraints>
+<budget_awareness>
+Team budget: {team_config.total_budget} tokens total for this task
+Your allocation (Researcher): {budget.total} tokens per call (60% of team)
+- {budget.reasoning_tokens} tokens available for thinking/reasoning per call
+- {budget.output_tokens} tokens available for your response per call
 
-<your_allocation>
-As RESEARCHER, your allocation across ALL rounds:
-- {budget.reasoning_tokens} tokens for thinking/reasoning
-- {budget.output_tokens} tokens for your output
-- {budget.total} tokens total (60% of team budget)
+Note: Each agent call (each round) has this same budget limit.
+Be concise and efficient within each call to enable multiple rounds if needed.
+</budget_awareness>
+</constraints>"""
 
-Manage this budget across up to {team_config.max_iterations} iterations.
-Each round uses part of your total allocation.
-</your_allocation>
+    else:  # NEGOTIATION_AWARENESS
+        constraints = f"""<constraints>
+<budget_awareness>
+Team budget structure:
+- Total: {team_config.total_budget} tokens
+- Allocated: {team_config.allocated_budget} tokens (distributed to agents)
+- Reserve pool: {team_config.reserve_pool} tokens (available through discussion)
 
-{base}"""
+Your current allocation (Researcher): {budget.total} tokens per call
+- {budget.reasoning_tokens} tokens for thinking/reasoning per call
+- {budget.output_tokens} tokens for your response per call
 
-    else:  # WITH_NEGOTIATION
-        return f"""<team_budget>
-Your team has {team_config.total_budget} tokens total.
-Initial allocation: {team_config.allocated_budget} tokens
-Reserve pool: {team_config.reserve_pool} tokens (available for requests)
-</team_budget>
+Budget discussion protocol:
+If you encounter a challenging question that requires additional search depth or analysis,
+you can communicate this need to the Validator:
 
-<your_allocation>
-Your initial allocation as RESEARCHER:
-- {budget.reasoning_tokens} tokens for thinking/reasoning
-- {budget.output_tokens} tokens for your output
-- {budget.total} tokens total
+"[BUDGET NOTE: This question requires [specific need, e.g., 'additional verification of conflicting sources']. Additional budget from reserve may be beneficial.]"
 
-If you need MORE budget to address Validator feedback, call:
-request_budget(amount, justification)
+The Validator can acknowledge this in their feedback. This creates mutual awareness of task complexity.
+</budget_awareness>
+</constraints>"""
 
-Provide clear justification (e.g., "Need to search additional sources to verify X").
-</your_allocation>
-
-{base}"""
+    # Combine sections in best-practice order
+    if constraints:
+        return f"{persona}\n\n{constraints}\n\n{task}\n\n{iteration}\n\n{output_format}"
+    else:
+        return f"{persona}\n\n{task}\n\n{iteration}\n\n{output_format}"
 
 
 def _create_validator_instruction(team_config: IterativeTeamConfig) -> str:
@@ -332,75 +367,115 @@ def _create_validator_instruction(team_config: IterativeTeamConfig) -> str:
     condition = team_config.awareness_condition
     budget = team_config.validator_budget
 
-    base = f"""<role>
-You are the VALIDATOR in a 2-agent iterative team.
+    # Persona
+    persona = """<persona>
+You are the VALIDATOR in a 2-agent iterative collaboration team.
+Your role is to critically evaluate the Researcher's work and either approve or provide constructive feedback.
+</persona>"""
 
-Your task:
-1. Critically evaluate the Researcher's proposal and reasoning
-2. You can independently verify facts using google_search if needed
-3. Either APPROVE the answer or provide constructive feedback
+    # Task description
+    task = f"""<task>
+1. Carefully review the Researcher's proposed answer and reasoning
+2. Check for logical flaws, missing information, or unsupported claims
+3. You can use google_search to independently verify facts if needed
+4. Decide whether to APPROVE or request revisions
 
-Output format options:
-- APPROVE: "APPROVED. Final answer: [X] because [validation reasoning]"
-- Request clarification: "Please verify: Did you check [Y]?"
-- Identify error: "Your reasoning has a flaw: [Z]. Please revise."
-- Request more info: "You're missing information about [W]."
+Decision criteria:
+- APPROVE if the answer is well-supported and accurate
+- REQUEST REVISION if there are gaps, errors, or unclear reasoning
+- Balance thoroughness with efficiency (up to {team_config.max_iterations} rounds total)
+</task>"""
 
-CRITICAL: If you approve, you MUST start your response with "APPROVED" (exact word).
-This signals the system to finalize the answer.
+    # Iteration awareness
+    iteration = f"""<iteration_context>
+This is an iterative process with up to {team_config.max_iterations} rounds.
+- You can see the round number from the conversation history
+- Round 1: Evaluate initial proposal
+- Round 2+: Check if Researcher addressed your previous feedback
+- End condition: You approve OR maximum rounds reached
+</iteration_context>"""
 
-Up to {team_config.max_iterations} rounds available. Approve when answer is good enough.
-</role>"""
+    # Output format
+    output_format = """<output_format>
+**If APPROVING:**
+"APPROVED. Final answer: [X] because [your validation reasoning showing why this answer is correct and well-supported]."
 
-    # Add budget awareness
+CRITICAL: You MUST start with the exact word "APPROVED" to signal approval.
+
+**If REQUESTING REVISION:**
+Choose the appropriate feedback type:
+
+1. Request clarification: "Please verify: Did you check [specific aspect]? I found [conflicting information]."
+2. Identify reasoning flaw: "Your reasoning has an issue: [specific problem]. Please reconsider [what to fix]."
+3. Request more evidence: "You're missing information about [specific gap]. Please search for [what to find]."
+
+Always:
+- Be specific about what needs improvement
+- Provide constructive guidance
+- Acknowledge what the Researcher did well
+</output_format>"""
+
+    # Budget awareness (varies by condition)
     if condition == MultiAgentAwarenessCondition.NO_AWARENESS:
-        return base
+        constraints = ""
 
     elif condition == MultiAgentAwarenessCondition.OVERALL_ONLY:
-        return f"""<team_budget>
-Your 2-agent team has {team_config.total_budget} tokens TOTAL across up to {team_config.max_iterations} rounds.
-Use resources efficiently - approve when answer is good enough.
-</team_budget>
+        constraints = f"""<constraints>
+<budget_awareness>
+Your 2-agent team has a TOTAL budget of {team_config.total_budget} tokens for this task.
+This budget is shared across both agents (Researcher and Validator) and all {team_config.max_iterations} rounds.
 
-{base}"""
+Efficiency considerations:
+- Additional iterations consume team budget
+- Approve when the answer is good enough, even if not perfect
+- Balance quality with resource efficiency
+</budget_awareness>
+</constraints>"""
 
     elif condition == MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL:
-        return f"""<team_budget>
-Your team has {team_config.total_budget} tokens total across up to {team_config.max_iterations} rounds.
-</team_budget>
+        constraints = f"""<constraints>
+<budget_awareness>
+Team budget: {team_config.total_budget} tokens total for this task
+Your allocation (Validator): {budget.total} tokens per call (40% of team)
+- {budget.reasoning_tokens} tokens available for thinking/reasoning per call
+- {budget.output_tokens} tokens available for your response per call
 
-<your_allocation>
-As VALIDATOR, your allocation across ALL rounds:
-- {budget.reasoning_tokens} tokens for thinking/reasoning
-- {budget.output_tokens} tokens for your output
-- {budget.total} tokens total (40% of team budget)
+Note: Each agent call (each round) has this same budget limit.
+Be thorough but concise to enable multiple rounds if needed.
+Balance verification depth with efficiency.
+</budget_awareness>
+</constraints>"""
 
-Manage this budget across up to {team_config.max_iterations} iterations.
-Balance thoroughness with efficiency - approve when answer is good enough.
-</your_allocation>
+    else:  # NEGOTIATION_AWARENESS
+        constraints = f"""<constraints>
+<budget_awareness>
+Team budget structure:
+- Total: {team_config.total_budget} tokens
+- Allocated: {team_config.allocated_budget} tokens (distributed to agents)
+- Reserve pool: {team_config.reserve_pool} tokens (available through discussion)
 
-{base}"""
+Your current allocation (Validator): {budget.total} tokens per call
+- {budget.reasoning_tokens} tokens for thinking/reasoning per call
+- {budget.output_tokens} tokens for your response per call
 
-    else:  # WITH_NEGOTIATION
-        return f"""<team_budget>
-Your team has {team_config.total_budget} tokens total.
-Initial allocation: {team_config.allocated_budget} tokens
-Reserve pool: {team_config.reserve_pool} tokens (available for requests)
-</team_budget>
+Budget discussion protocol:
+If you see the Researcher indicate a complex question (via [BUDGET NOTE: ...]), you can acknowledge this in your feedback:
 
-<your_allocation>
-Your initial allocation as VALIDATOR:
-- {budget.reasoning_tokens} tokens for thinking/reasoning
-- {budget.output_tokens} tokens for your output
-- {budget.total} tokens total
+"[BUDGET ACKNOWLEDGED: Agree this question requires [specific complexity]. The additional verification you suggest is warranted.]"
 
-If you need MORE budget for thorough verification, call:
-request_budget(amount, justification)
+OR if you assess the task as simpler:
 
-Provide clear justification (e.g., "Need to independently verify claim X").
-</your_allocation>
+"[BUDGET NOTE: I believe the current evidence is sufficient. Recommend approval to conserve team budget.]"
 
-{base}"""
+This creates mutual awareness about task complexity and resource needs.
+</budget_awareness>
+</constraints>"""
+
+    # Combine sections in best-practice order
+    if constraints:
+        return f"{persona}\n\n{constraints}\n\n{task}\n\n{iteration}\n\n{output_format}"
+    else:
+        return f"{persona}\n\n{task}\n\n{iteration}\n\n{output_format}"
 
 
 # ============================================================================
@@ -501,12 +576,8 @@ class AgentFactory:
         if tools is None:
             tools = [google_search]
 
-        # Add negotiation tool for condition D
-        if (
-            team_config.awareness_condition
-            == MultiAgentAwarenessCondition.WITH_NEGOTIATION
-        ):
-            tools = tools + [request_budget]
+        # NEGOTIATION_AWARENESS uses instruction-based negotiation (no tool needed)
+        # All conditions use the same tools to avoid API conflicts with thinking mode
 
         # Create 3 role-based agents
         agents = []
@@ -515,17 +586,9 @@ class AgentFactory:
             role_alloc = team_config.allocations[role]
             instruction = _create_multiagent_instruction(role, team_config)
 
-            # Researcher gets tools, others don't need them
-            agent_tools = (
-                tools
-                if role == AgentRole.RESEARCHER
-                else (
-                    [request_budget]
-                    if team_config.awareness_condition
-                    == MultiAgentAwarenessCondition.WITH_NEGOTIATION
-                    else []
-                )
-            )
+            # Only Researcher gets tools (google_search)
+            # Others don't need tools - they work with text from previous agents
+            agent_tools = tools if role == AgentRole.RESEARCHER else []
 
             agent = LlmAgent(
                 model=self.model,
@@ -582,13 +645,9 @@ class AgentFactory:
         if tools is None:
             tools = [google_search]
 
-        # Add negotiation tool for Condition D
+        # NEGOTIATION_AWARENESS uses instruction-based negotiation (no tool needed)
+        # All conditions use the same tools to avoid API conflicts with thinking mode
         agent_tools = tools
-        if (
-            team_config.awareness_condition
-            == MultiAgentAwarenessCondition.WITH_NEGOTIATION
-        ):
-            agent_tools = tools + [request_budget]
 
         # Create Researcher agent
         researcher_instruction = _create_researcher_instruction(team_config)
