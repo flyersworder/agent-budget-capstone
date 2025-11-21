@@ -11,7 +11,7 @@ import os
 from typing import Any
 
 from dotenv import load_dotenv
-from google.adk.agents import Agent, LlmAgent, SequentialAgent
+from google.adk.agents import Agent, LlmAgent, LoopAgent, SequentialAgent
 from google.adk.planners import BuiltInPlanner
 from google.adk.tools import google_search
 from google.adk.tools.tool_context import ToolContext
@@ -20,10 +20,12 @@ from google.genai import types
 from .awareness import AwarenessCondition
 from .core import (
     AgentRole,
+    IterativeTeamConfig,
     MultiAgentAwarenessCondition,
     MultiAgentBudgetConfig,
     TokenBudget,
 )
+from .loop_agents import CheckApprovalAgent
 
 # Load environment variables
 load_dotenv()
@@ -236,6 +238,172 @@ Provide a clear justification explaining why additional budget is needed.
 
 
 # ============================================================================
+# PART 2 ITERATIVE: Instruction Generators
+# ============================================================================
+
+
+def _create_researcher_instruction(team_config: IterativeTeamConfig) -> str:
+    """Create instruction for Researcher in iterative team.
+
+    Args:
+        team_config: Iterative team budget configuration
+
+    Returns:
+        Instruction string for Researcher
+    """
+    condition = team_config.awareness_condition
+    budget = team_config.researcher_budget
+
+    base = """<role>
+You are the RESEARCHER in a 2-agent iterative team.
+
+Your task:
+1. Use google_search to gather information and evidence
+2. Propose an answer with clear reasoning
+3. If you receive feedback from the Validator, revise your answer accordingly
+
+Output format:
+- Round 1: "Based on [evidence], I propose the answer is [X] because [reasoning]"
+- Round N: "Based on feedback, I revise my answer to [Y] because [new reasoning]"
+
+Important: Provide detailed reasoning so the Validator can verify your work.
+</role>"""
+
+    # Add budget awareness
+    if condition == MultiAgentAwarenessCondition.NO_AWARENESS:
+        return base
+
+    elif condition == MultiAgentAwarenessCondition.OVERALL_ONLY:
+        return f"""<team_budget>
+Your 2-agent team has {team_config.total_budget} tokens TOTAL across up to {team_config.max_iterations} rounds.
+Use resources efficiently - unnecessary iterations waste budget.
+</team_budget>
+
+{base}"""
+
+    elif condition == MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL:
+        return f"""<team_budget>
+Your team has {team_config.total_budget} tokens total across up to {team_config.max_iterations} rounds.
+</team_budget>
+
+<your_allocation>
+As RESEARCHER, your allocation across ALL rounds:
+- {budget.reasoning_tokens} tokens for thinking/reasoning
+- {budget.output_tokens} tokens for your output
+- {budget.total} tokens total (60% of team budget)
+
+Manage this budget across up to {team_config.max_iterations} iterations.
+Each round uses part of your total allocation.
+</your_allocation>
+
+{base}"""
+
+    else:  # WITH_NEGOTIATION
+        return f"""<team_budget>
+Your team has {team_config.total_budget} tokens total.
+Initial allocation: {team_config.allocated_budget} tokens
+Reserve pool: {team_config.reserve_pool} tokens (available for requests)
+</team_budget>
+
+<your_allocation>
+Your initial allocation as RESEARCHER:
+- {budget.reasoning_tokens} tokens for thinking/reasoning
+- {budget.output_tokens} tokens for your output
+- {budget.total} tokens total
+
+If you need MORE budget to address Validator feedback, call:
+request_budget(amount, justification)
+
+Provide clear justification (e.g., "Need to search additional sources to verify X").
+</your_allocation>
+
+{base}"""
+
+
+def _create_validator_instruction(team_config: IterativeTeamConfig) -> str:
+    """Create instruction for Validator in iterative team.
+
+    Args:
+        team_config: Iterative team budget configuration
+
+    Returns:
+        Instruction string for Validator
+    """
+    condition = team_config.awareness_condition
+    budget = team_config.validator_budget
+
+    base = f"""<role>
+You are the VALIDATOR in a 2-agent iterative team.
+
+Your task:
+1. Critically evaluate the Researcher's proposal and reasoning
+2. You can independently verify facts using google_search if needed
+3. Either APPROVE the answer or provide constructive feedback
+
+Output format options:
+- APPROVE: "APPROVED. Final answer: [X] because [validation reasoning]"
+- Request clarification: "Please verify: Did you check [Y]?"
+- Identify error: "Your reasoning has a flaw: [Z]. Please revise."
+- Request more info: "You're missing information about [W]."
+
+CRITICAL: If you approve, you MUST start your response with "APPROVED" (exact word).
+This signals the system to finalize the answer.
+
+Up to {team_config.max_iterations} rounds available. Approve when answer is good enough.
+</role>"""
+
+    # Add budget awareness
+    if condition == MultiAgentAwarenessCondition.NO_AWARENESS:
+        return base
+
+    elif condition == MultiAgentAwarenessCondition.OVERALL_ONLY:
+        return f"""<team_budget>
+Your 2-agent team has {team_config.total_budget} tokens TOTAL across up to {team_config.max_iterations} rounds.
+Use resources efficiently - approve when answer is good enough.
+</team_budget>
+
+{base}"""
+
+    elif condition == MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL:
+        return f"""<team_budget>
+Your team has {team_config.total_budget} tokens total across up to {team_config.max_iterations} rounds.
+</team_budget>
+
+<your_allocation>
+As VALIDATOR, your allocation across ALL rounds:
+- {budget.reasoning_tokens} tokens for thinking/reasoning
+- {budget.output_tokens} tokens for your output
+- {budget.total} tokens total (40% of team budget)
+
+Manage this budget across up to {team_config.max_iterations} iterations.
+Balance thoroughness with efficiency - approve when answer is good enough.
+</your_allocation>
+
+{base}"""
+
+    else:  # WITH_NEGOTIATION
+        return f"""<team_budget>
+Your team has {team_config.total_budget} tokens total.
+Initial allocation: {team_config.allocated_budget} tokens
+Reserve pool: {team_config.reserve_pool} tokens (available for requests)
+</team_budget>
+
+<your_allocation>
+Your initial allocation as VALIDATOR:
+- {budget.reasoning_tokens} tokens for thinking/reasoning
+- {budget.output_tokens} tokens for your output
+- {budget.total} tokens total
+
+If you need MORE budget for thorough verification, call:
+request_budget(amount, justification)
+
+Provide clear justification (e.g., "Need to independently verify claim X").
+</your_allocation>
+
+{base}"""
+
+
+# ============================================================================
 # Agent Factory
 # ============================================================================
 
@@ -385,4 +553,101 @@ class AgentFactory:
             name=f"team_{team_config.awareness_condition.value}",
             description="Multi-agent team for Part 2 budget coordination study",
             sub_agents=agents,
+        )
+
+    # ========================================================================
+    # PART 2 ITERATIVE: 2-Agent Iterative Team Creation
+    # ========================================================================
+
+    def create_iterative_team(
+        self,
+        team_config: IterativeTeamConfig,
+        tools: list[Any] | None = None,
+    ) -> LoopAgent:
+        """Create iterative 2-agent team for Part 2 coordination study.
+
+        Creates a LoopAgent with iterative Researcher ⇄ Validator workflow:
+        1. Researcher proposes answer with reasoning
+        2. Validator evaluates and either approves or provides feedback
+        3. CheckApproval agent checks for approval and exits loop if found
+        4. Loop repeats up to max_iterations times
+
+        Args:
+            team_config: Iterative team budget configuration
+            tools: Tools for agents (default: [google_search])
+
+        Returns:
+            LoopAgent with configured Researcher, Validator, and CheckApproval agents
+        """
+        if tools is None:
+            tools = [google_search]
+
+        # Add negotiation tool for Condition D
+        agent_tools = tools
+        if (
+            team_config.awareness_condition
+            == MultiAgentAwarenessCondition.WITH_NEGOTIATION
+        ):
+            agent_tools = tools + [request_budget]
+
+        # Create Researcher agent
+        researcher_instruction = _create_researcher_instruction(team_config)
+        researcher = LlmAgent(
+            model=self.model,
+            name="Researcher",
+            instruction=researcher_instruction,
+            description="Gathers information and proposes answers",
+            tools=agent_tools,
+            planner=BuiltInPlanner(
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=team_config.researcher_budget.reasoning_tokens,
+                    include_thoughts=True,
+                )
+            ),
+            generate_content_config=types.GenerateContentConfig(
+                # IMPORTANT: Per-call budget, not cumulative
+                # Instruction tells agent to manage across iterations
+                max_output_tokens=team_config.researcher_budget.total,
+                temperature=0.2,
+            ),
+            output_key="researcher_output",  # Saves to state['researcher_output']
+        )
+
+        # Create Validator agent
+        validator_instruction = _create_validator_instruction(team_config)
+        validator = LlmAgent(
+            model=self.model,
+            name="Validator",
+            instruction=validator_instruction,
+            description="Validates research and provides feedback or approval",
+            tools=agent_tools,  # Can also search to verify
+            planner=BuiltInPlanner(
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=team_config.validator_budget.reasoning_tokens,
+                    include_thoughts=True,
+                )
+            ),
+            generate_content_config=types.GenerateContentConfig(
+                max_output_tokens=team_config.validator_budget.total,
+                temperature=0.2,
+            ),
+            output_key="validator_feedback",  # Saves to state['validator_feedback']
+        )
+
+        # Create CheckApproval agent
+        # This agent checks if validator_feedback contains "APPROVED"
+        # If yes, escalates to exit the loop
+        check_approval = CheckApprovalAgent(
+            name="CheckApproval",
+            description="Checks if Validator approved and exits loop",
+        )
+
+        # Create LoopAgent
+        # Loop runs: Researcher → Validator → CheckApproval
+        # Exits when CheckApproval escalates (approval found) or max_iterations reached
+        return LoopAgent(
+            name=f"iterative_team_{team_config.awareness_condition.value}",
+            description="Iterative 2-agent team with Researcher ⇄ Validator loop",
+            sub_agents=[researcher, validator, check_approval],
+            max_iterations=team_config.max_iterations,
         )

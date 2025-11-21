@@ -272,3 +272,137 @@ class MultiAgentBudgetConfig:
             reserve_pool=reserve,
             awareness_condition=MultiAgentAwarenessCondition.WITH_NEGOTIATION,
         )
+
+
+# ============================================================================
+# PART 2: Iterative 2-Agent Team Configuration
+# ============================================================================
+
+
+@dataclass
+class IterativeTeamConfig:
+    """Budget configuration for iterative 2-agent team (Researcher ⇄ Validator).
+
+    Attributes:
+        total_budget: Total team budget across all iterations
+        researcher_budget: Budget for Researcher agent
+        validator_budget: Budget for Validator agent
+        max_iterations: Maximum number of refinement rounds (default: 3)
+        reserve_pool: Tokens held in reserve for negotiation (Condition D only)
+        awareness_condition: How budget info is communicated to agents
+    """
+
+    total_budget: int
+    researcher_budget: TokenBudget
+    validator_budget: TokenBudget
+    max_iterations: int = 3
+    reserve_pool: int = 0
+    awareness_condition: MultiAgentAwarenessCondition = (
+        MultiAgentAwarenessCondition.NO_AWARENESS
+    )
+
+    @property
+    def allocated_budget(self) -> int:
+        """Total allocated to both agents."""
+        return self.researcher_budget.total + self.validator_budget.total
+
+    def validate(self) -> bool:
+        """Ensure configuration is valid.
+
+        Returns:
+            True if valid, False otherwise
+        """
+        # Total allocated + reserve should equal total budget
+        total_used = self.allocated_budget + self.reserve_pool
+        return total_used == self.total_budget
+
+    @staticmethod
+    def create_standard(
+        total_budget: int = 2000,
+        awareness_condition: MultiAgentAwarenessCondition = MultiAgentAwarenessCondition.NO_AWARENESS,
+    ) -> "IterativeTeamConfig":
+        """Create standard 60/40 split config.
+
+        Researcher gets 60% (more tool use), Validator gets 40%.
+
+        NOTE: Minimum 2000 tokens required to meet Gemini's 512 token
+        thinking budget minimum for both agents.
+
+        Args:
+            total_budget: Total team budget (default: 2000)
+            awareness_condition: How to communicate budget
+
+        Returns:
+            IterativeTeamConfig with 60/40 allocation
+        """
+        researcher_total = int(total_budget * 0.60)  # 1200
+        validator_total = int(total_budget * 0.40)  # 800
+
+        # Researcher: 60% reasoning, 40% output (more tool-heavy)
+        # 720 reasoning, 480 output
+        researcher_reasoning = int(researcher_total * 0.60)
+        researcher_budget = TokenBudget(
+            reasoning_tokens=researcher_reasoning,
+            output_tokens=researcher_total - researcher_reasoning,
+        )
+
+        # Validator: 65% reasoning, 35% output (ensure 512+ thinking budget)
+        # 520 reasoning, 280 output
+        validator_reasoning = int(validator_total * 0.65)
+        validator_budget = TokenBudget(
+            reasoning_tokens=validator_reasoning,
+            output_tokens=validator_total - validator_reasoning,
+        )
+
+        return IterativeTeamConfig(
+            total_budget=total_budget,
+            researcher_budget=researcher_budget,
+            validator_budget=validator_budget,
+            max_iterations=3,
+            reserve_pool=0,
+            awareness_condition=awareness_condition,
+        )
+
+    @staticmethod
+    def create_with_negotiation(
+        total_budget: int = 2000,
+        initial_allocation_pct: float = 0.80,
+    ) -> "IterativeTeamConfig":
+        """Create config with negotiation reserve pool.
+
+        Args:
+            total_budget: Total team budget (default: 2000)
+            initial_allocation_pct: Percentage to allocate initially (default: 80%)
+
+        Returns:
+            IterativeTeamConfig with reserve pool for negotiation
+        """
+        initial_budget = int(total_budget * initial_allocation_pct)  # 1600
+        reserve = total_budget - initial_budget  # 400
+
+        # 60/40 split of initial allocation
+        researcher_total = int(initial_budget * 0.60)  # 960
+        validator_total = int(initial_budget * 0.40)  # 640
+
+        # Researcher: 60% reasoning
+        researcher_reasoning = int(researcher_total * 0.60)  # 576
+        researcher_budget = TokenBudget(
+            reasoning_tokens=researcher_reasoning,
+            output_tokens=researcher_total - researcher_reasoning,
+        )
+
+        # Validator: 80% reasoning to ensure 512+ (640 * 0.80 = 512)
+        validator_reasoning = int(validator_total * 0.80)  # 512
+        validator_budget = TokenBudget(
+            reasoning_tokens=validator_reasoning,
+            output_tokens=validator_total - validator_reasoning,
+        )
+
+        return IterativeTeamConfig(
+            total_budget=total_budget,
+            researcher_budget=researcher_budget,
+            validator_budget=validator_budget,
+            max_iterations=3,
+            reserve_pool=reserve,
+            awareness_condition=MultiAgentAwarenessCondition.WITH_NEGOTIATION,
+        )
