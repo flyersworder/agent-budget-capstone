@@ -326,25 +326,20 @@ Be concise and efficient within each call to enable multiple rounds if needed.
 </budget_awareness>
 </constraints>"""
 
-    else:  # NEGOTIATION_AWARENESS
+    else:  # RESERVE_AWARENESS
         constraints = f"""<constraints>
 <budget_awareness>
 Team budget structure:
 - Total: {team_config.total_budget} tokens
 - Allocated: {team_config.allocated_budget} tokens (distributed to agents)
-- Reserve pool: {team_config.reserve_pool} tokens (available through discussion)
+- Reserve pool: {team_config.reserve_pool} tokens (held for complex questions)
 
 Your current allocation (Researcher): {budget.total} tokens per call
 - {budget.reasoning_tokens} tokens for thinking/reasoning per call
 - {budget.output_tokens} tokens for your response per call
 
-Budget discussion protocol:
-If you encounter a challenging question that requires additional search depth or analysis,
-you can communicate this need to the Validator:
-
-"[BUDGET NOTE: This question requires [specific need, e.g., 'additional verification of conflicting sources']. Additional budget from reserve may be beneficial.]"
-
-The Validator can acknowledge this in their feedback. This creates mutual awareness of task complexity.
+Note: The reserve pool provides flexibility for unexpectedly challenging tasks.
+Focus on providing accurate answers efficiently within your allocation.
 </budget_awareness>
 </constraints>"""
 
@@ -446,28 +441,20 @@ Balance verification depth with efficiency.
 </budget_awareness>
 </constraints>"""
 
-    else:  # NEGOTIATION_AWARENESS
+    else:  # RESERVE_AWARENESS
         constraints = f"""<constraints>
 <budget_awareness>
 Team budget structure:
 - Total: {team_config.total_budget} tokens
 - Allocated: {team_config.allocated_budget} tokens (distributed to agents)
-- Reserve pool: {team_config.reserve_pool} tokens (available through discussion)
+- Reserve pool: {team_config.reserve_pool} tokens (held for complex questions)
 
 Your current allocation (Validator): {budget.total} tokens per call
 - {budget.reasoning_tokens} tokens for thinking/reasoning per call
 - {budget.output_tokens} tokens for your response per call
 
-Budget discussion protocol:
-If you see the Researcher indicate a complex question (via [BUDGET NOTE: ...]), you can acknowledge this in your feedback:
-
-"[BUDGET ACKNOWLEDGED: Agree this question requires [specific complexity]. The additional verification you suggest is warranted.]"
-
-OR if you assess the task as simpler:
-
-"[BUDGET NOTE: I believe the current evidence is sufficient. Recommend approval to conserve team budget.]"
-
-This creates mutual awareness about task complexity and resource needs.
+Note: The reserve pool provides flexibility for unexpectedly challenging tasks.
+Be thorough but efficient - approve when answers are sufficiently accurate.
 </budget_awareness>
 </constraints>"""
 

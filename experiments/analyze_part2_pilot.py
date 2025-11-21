@@ -2,7 +2,7 @@
 
 Analyzes:
 1. Performance patterns across conditions
-2. Budget note protocol usage in NEGOTIATION_AWARENESS
+2. Reserve pool awareness effects in RESERVE_AWARENESS
 3. Agent communication patterns
 4. Token efficiency and iteration behavior
 5. Readiness assessment for full study
@@ -38,7 +38,7 @@ def analyze_by_condition(results: dict[str, Any]) -> None:
         "no_awareness",
         "overall_only",
         "overall_and_individual",
-        "negotiation_awareness",
+        "reserve_awareness",
     ]
 
     for condition in conditions:
@@ -85,18 +85,16 @@ def analyze_by_condition(results: dict[str, Any]) -> None:
 
 
 def analyze_negotiation_protocol(results: dict[str, Any]) -> None:
-    """Check if NEGOTIATION_AWARENESS trials used the [BUDGET NOTE:...] protocol."""
+    """Check reserve awareness communication patterns."""
     print("\n" + "=" * 80)
-    print("NEGOTIATION PROTOCOL USAGE")
+    print("RESERVE AWARENESS COMMUNICATION")
     print("=" * 80)
 
     neg_trials = [
-        t
-        for t in results["trials"]
-        if t["awareness_condition"] == "negotiation_awareness"
+        t for t in results["trials"] if t["awareness_condition"] == "reserve_awareness"
     ]
 
-    print(f"\nTotal NEGOTIATION_AWARENESS trials: {len(neg_trials)}")
+    print(f"\nTotal RESERVE_AWARENESS trials: {len(neg_trials)}")
 
     # Check for budget note markers in outputs
     researcher_notes = 0
@@ -154,7 +152,7 @@ def analyze_communication_patterns(results: dict[str, Any]) -> None:
         "no_awareness",
         "overall_only",
         "overall_and_individual",
-        "negotiation_awareness",
+        "reserve_awareness",
     ]
 
     for condition in conditions:
@@ -189,7 +187,7 @@ def show_example_trials(results: dict[str, Any]) -> None:
     print("=" * 80)
 
     # Find one correct and one incorrect from each condition
-    conditions = ["no_awareness", "negotiation_awareness"]
+    conditions = ["no_awareness", "reserve_awareness"]
 
     for condition in conditions:
         trials = [t for t in results["trials"] if t["awareness_condition"] == condition]
@@ -247,7 +245,7 @@ def readiness_assessment(results: dict[str, Any]) -> None:
         "no_awareness",
         "overall_only",
         "overall_and_individual",
-        "negotiation_awareness",
+        "reserve_awareness",
     ]
     condition_scores = []
 

@@ -65,8 +65,8 @@ class MultiAgentAwarenessCondition(Enum):
     NO_AWARENESS = "no_awareness"  # Baseline: no budget information
     OVERALL_ONLY = "overall_only"  # Know total team budget only
     OVERALL_AND_INDIVIDUAL = "overall_and_individual"  # Know total + own allocation
-    NEGOTIATION_AWARENESS = (
-        "negotiation_awareness"  # Aware of negotiation, can discuss budget needs
+    RESERVE_AWARENESS = (
+        "reserve_awareness"  # Know total + own allocation + reserve pool
     )
 
 
@@ -231,18 +231,18 @@ class MultiAgentBudgetConfig:
         )
 
     @staticmethod
-    def create_negotiation_awareness(
+    def create_reserve_awareness(
         total_budget: int,
         initial_allocation_pct: float = 0.6,
     ) -> "MultiAgentBudgetConfig":
-        """Create config with negotiation reserve pool.
+        """Create config with reserve pool awareness.
 
         Args:
             total_budget: Total team budget
             initial_allocation_pct: Percentage to allocate initially (default: 60%)
 
         Returns:
-            MultiAgentBudgetConfig with reserve pool for negotiation
+            MultiAgentBudgetConfig with reserve pool
         """
         initial_budget = int(total_budget * initial_allocation_pct)
         reserve = total_budget - initial_budget
@@ -272,7 +272,7 @@ class MultiAgentBudgetConfig:
             total_budget=total_budget,
             allocations=allocations,
             reserve_pool=reserve,
-            awareness_condition=MultiAgentAwarenessCondition.NEGOTIATION_AWARENESS,
+            awareness_condition=MultiAgentAwarenessCondition.RESERVE_AWARENESS,
         )
 
 
@@ -366,18 +366,18 @@ class IterativeTeamConfig:
         )
 
     @staticmethod
-    def create_negotiation_awareness(
+    def create_reserve_awareness(
         total_budget: int = 2000,
         initial_allocation_pct: float = 0.80,
     ) -> "IterativeTeamConfig":
-        """Create config with negotiation reserve pool.
+        """Create config with reserve pool awareness.
 
         Args:
             total_budget: Total team budget (default: 2000)
             initial_allocation_pct: Percentage to allocate initially (default: 80%)
 
         Returns:
-            IterativeTeamConfig with reserve pool for negotiation
+            IterativeTeamConfig with reserve pool
         """
         initial_budget = int(total_budget * initial_allocation_pct)  # 1600
         reserve = total_budget - initial_budget  # 400
@@ -406,5 +406,5 @@ class IterativeTeamConfig:
             validator_budget=validator_budget,
             max_iterations=3,
             reserve_pool=reserve,
-            awareness_condition=MultiAgentAwarenessCondition.NEGOTIATION_AWARENESS,
+            awareness_condition=MultiAgentAwarenessCondition.RESERVE_AWARENESS,
         )

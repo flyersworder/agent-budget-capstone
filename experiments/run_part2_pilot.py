@@ -5,7 +5,7 @@ Tests how budget awareness affects coordination in iterative 2-agent teams
 
 Design:
 - 4 awareness conditions × 5 HotpotQA questions = 20 trials
-- Conditions: NO_AWARENESS, OVERALL_ONLY, OVERALL_AND_INDIVIDUAL, NEGOTIATION_AWARENESS
+- Conditions: NO_AWARENESS, OVERALL_ONLY, OVERALL_AND_INDIVIDUAL, RESERVE_AWARENESS
 - Max 3 iterations per trial
 - Track: iterations, token usage per agent, approval status, answer correctness
 
@@ -138,8 +138,8 @@ async def run_single_trial(
     print(f"{'=' * 80}")
 
     # Create team configuration
-    if condition == MultiAgentAwarenessCondition.NEGOTIATION_AWARENESS:
-        config = IterativeTeamConfig.create_negotiation_awareness()
+    if condition == MultiAgentAwarenessCondition.RESERVE_AWARENESS:
+        config = IterativeTeamConfig.create_reserve_awareness()
     else:
         config = IterativeTeamConfig.create_standard(awareness_condition=condition)
 
@@ -301,7 +301,7 @@ async def run_pilot() -> Part2PilotResults:
     print("  A. NO_AWARENESS: No budget information")
     print("  B. OVERALL_ONLY: Team budget only")
     print("  C. OVERALL_AND_INDIVIDUAL: Team + individual budgets")
-    print("  D. NEGOTIATION_AWARENESS: Aware of budget negotiation, can discuss needs")
+    print("  D. RESERVE_AWARENESS: Team + individual + reserve pool awareness")
     print()
     print("=" * 80)
 
@@ -325,7 +325,7 @@ async def run_pilot() -> Part2PilotResults:
         MultiAgentAwarenessCondition.NO_AWARENESS,
         MultiAgentAwarenessCondition.OVERALL_ONLY,
         MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL,
-        MultiAgentAwarenessCondition.NEGOTIATION_AWARENESS,
+        MultiAgentAwarenessCondition.RESERVE_AWARENESS,
     ]
 
     # Run all trials
@@ -387,7 +387,7 @@ def print_summary(results: Part2PilotResults) -> None:
         "no_awareness",
         "overall_only",
         "overall_and_individual",
-        "negotiation_awareness",
+        "reserve_awareness",
     ]:
         trials = [t for t in results.trials if t.awareness_condition == condition]
         if not trials:
