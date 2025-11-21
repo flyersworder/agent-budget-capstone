@@ -138,30 +138,6 @@ def test_budget_configurations():
     assert neg_config.validate(), "Negotiation config invalid"
 
 
-def test_legacy_support():
-    """Test legacy allocation strategy support."""
-    print("\n" + "=" * 80)
-    print("TEST: Legacy Allocation Strategies (Archived Part 1)")
-    print("=" * 80)
-
-    from agent_budget.core import AllocationStrategy
-
-    factory = AgentFactory()
-
-    for strategy in AllocationStrategy:
-        agent = factory.create_agent(strategy, total_budget=3000)
-        print(f"\n✓ Created {strategy.value} agent (legacy):")
-        print(f"  Name: {agent.name}")
-
-        budget_info = factory.get_budget_info(strategy, total_budget=3000)
-        print(
-            f"  Reasoning: {budget_info['reasoning_tokens']} tokens ({budget_info['reasoning_percentage']:.0f}%)"
-        )
-        print(
-            f"  Output: {budget_info['output_tokens']} tokens ({budget_info['output_percentage']:.0f}%)"
-        )
-
-
 def main():
     """Run all validation tests."""
     print("\n" + "=" * 80)
@@ -172,7 +148,6 @@ def main():
         test_part1_single_agents()
         test_part2_multiagent_teams()
         test_budget_configurations()
-        test_legacy_support()
 
         print("\n" + "=" * 80)
         print("✅ ALL TESTS PASSED")

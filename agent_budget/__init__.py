@@ -5,14 +5,13 @@ allocations in AI agents, demonstrating tradeoffs between reasoning
 depth and output verbosity.
 """
 
-from .core import AllocationStrategy, TokenBudget
 from .agent_factory import AgentFactory
+from .core import TokenBudget
 from .monitor import AgentMetrics, ToolUsageMetrics, UsageMonitor
 
 __version__ = "0.1.0"
 
 __all__ = [
-    "AllocationStrategy",
     "TokenBudget",
     "AgentFactory",
     "AgentMetrics",
