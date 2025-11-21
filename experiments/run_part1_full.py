@@ -37,7 +37,7 @@ from agent_budget.awareness import (
 )
 from agent_budget.core import TokenBudget
 from agent_budget.monitor import AgentMetrics, UsageMonitor
-from experiments.evaluator_objective import ObjectiveEvaluator
+from experiments.evaluator_truthfulqa import ObjectiveEvaluator
 from experiments.tasks.truthful_qa_tasks import TruthfulQATask
 
 
