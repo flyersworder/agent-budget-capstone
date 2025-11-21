@@ -26,6 +26,7 @@ from .core import (
     TokenBudget,
 )
 from .loop_agents import CheckApprovalAgent
+from .tracking_loop_agent import TrackingLoopAgent
 
 # Load environment variables
 load_dotenv()
@@ -370,15 +371,31 @@ Your role is to critically evaluate the Researcher's work and either approve or 
 
     # Task description
     task = f"""<task>
+Your role: Evaluate the quality of the Researcher's work based ONLY on what they provided.
+
 1. Carefully review the Researcher's proposed answer and reasoning
-2. Check for logical flaws, missing information, or unsupported claims
-3. You can use google_search to independently verify facts if needed
-4. Decide whether to APPROVE or request revisions
+2. Check for:
+   - Logical flaws or contradictions
+   - Claims without supporting evidence
+   - Missing key information needed to answer the question
+   - Gaps in reasoning chain
+
+3. Decide whether to APPROVE or REQUEST REVISION
 
 Decision criteria:
-- APPROVE if the answer is well-supported and accurate
-- REQUEST REVISION if there are gaps, errors, or unclear reasoning
-- Balance thoroughness with efficiency (up to {team_config.max_iterations} rounds total)
+- APPROVE if the answer is:
+  * Well-supported by the evidence Researcher provided
+  * Addresses all parts of the question
+  * Has clear reasoning connecting evidence to conclusion
+  * Free of obvious logical errors
+
+- REQUEST REVISION if:
+  * Key information is missing (specify exactly what)
+  * Reasoning has gaps or flaws (specify exactly where)
+  * Evidence doesn't support the conclusion
+
+Note: You do NOT have search tools. You can only evaluate what the Researcher provided.
+Balance thoroughness with efficiency (up to {team_config.max_iterations} rounds total).
 </task>"""
 
     # Iteration awareness
@@ -393,21 +410,30 @@ This is an iterative process with up to {team_config.max_iterations} rounds.
     # Output format
     output_format = """<output_format>
 **If APPROVING:**
-"APPROVED. Final answer: [X] because [your validation reasoning showing why this answer is correct and well-supported]."
+"APPROVED. Final answer: [X] because [explain why the evidence supports this answer]."
 
 CRITICAL: You MUST start with the exact word "APPROVED" to signal approval.
 
 **If REQUESTING REVISION:**
-Choose the appropriate feedback type:
+Provide SPECIFIC, ACTIONABLE feedback using this template:
 
-1. Request clarification: "Please verify: Did you check [specific aspect]? I found [conflicting information]."
-2. Identify reasoning flaw: "Your reasoning has an issue: [specific problem]. Please reconsider [what to fix]."
-3. Request more evidence: "You're missing information about [specific gap]. Please search for [what to find]."
+"REQUEST REVISION.
 
-Always:
-- Be specific about what needs improvement
-- Provide constructive guidance
-- Acknowledge what the Researcher did well
+**Issue:** [State the specific problem - missing info, logical gap, or unsupported claim]
+
+**What's needed:** [Be very specific about what the Researcher should do next]
+Examples:
+- "Search for [specific fact X] about [specific topic Y]"
+- "Verify that [specific claim A] is consistent with [specific claim B]"
+- "Clarify the connection between [evidence C] and [conclusion D]"
+
+**Reason:** [Briefly explain why this matters for answering the question]"
+
+Requirements for effective feedback:
+✓ Name specific facts, claims, or search terms
+✓ Give clear direction for next round (what to search, verify, or clarify)
+✓ Avoid vague requests like "need more info" or "unclear reasoning"
+✗ Do NOT search yourself - Researcher will handle searches in next round
 </output_format>"""
 
     # Budget awareness (varies by condition)
@@ -660,13 +686,14 @@ class AgentFactory:
         )
 
         # Create Validator agent
+        # NOTE: Validator does NOT get search tools - only evaluates Researcher's work
         validator_instruction = _create_validator_instruction(team_config)
         validator = LlmAgent(
             model=self.model,
             name="Validator",
             instruction=validator_instruction,
             description="Validates research and provides feedback or approval",
-            tools=agent_tools,  # Can also search to verify
+            tools=[],  # No tools - validator only evaluates, doesn't search
             planner=BuiltInPlanner(
                 thinking_config=types.ThinkingConfig(
                     thinking_budget=team_config.validator_budget.reasoning_tokens,
@@ -683,15 +710,25 @@ class AgentFactory:
         # Create CheckApproval agent
         # This agent checks if validator_feedback contains "APPROVED"
         # If yes, escalates to exit the loop
+        # Also reports token usage with rich context for awareness conditions
+        report_usage = (
+            team_config.awareness_condition != MultiAgentAwarenessCondition.NO_AWARENESS
+        )
         check_approval = CheckApprovalAgent(
             name="CheckApproval",
             description="Checks if Validator approved and exits loop",
+            report_usage=report_usage,
+            awareness_condition=team_config.awareness_condition,
+            researcher_budget_total=team_config.researcher_budget.total,
+            validator_budget_total=team_config.validator_budget.total,
+            team_budget_total=team_config.total_budget,
         )
 
-        # Create LoopAgent
+        # Create TrackingLoopAgent
         # Loop runs: Researcher → Validator → CheckApproval
+        # Tracks token usage internally before passing to next agent
         # Exits when CheckApproval escalates (approval found) or max_iterations reached
-        return LoopAgent(
+        return TrackingLoopAgent(
             name=f"iterative_team_{team_config.awareness_condition.value}",
             description="Iterative 2-agent team with Researcher ⇄ Validator loop",
             sub_agents=[researcher, validator, check_approval],

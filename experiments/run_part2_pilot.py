@@ -67,6 +67,7 @@ class Part2TrialResult:
     metrics: MultiAgentMetrics
     correctness_score: HotpotQAScore
     duration_seconds: float
+    budget_messages: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary format."""
@@ -85,6 +86,7 @@ class Part2TrialResult:
             "metrics": self.metrics.to_dict(),
             "correctness_score": self.correctness_score.to_dict(),
             "duration_seconds": self.duration_seconds,
+            "budget_messages": self.budget_messages,
         }
 
 
@@ -163,6 +165,7 @@ async def run_single_trial(
     # Run the trial
     start_time = time.time()
     events = []
+    budget_messages = []  # Track budget messages shown to agents
 
     try:
         content = types.Content(role="user", parts=[types.Part(text=task.question)])
@@ -174,7 +177,17 @@ async def run_single_trial(
         ):
             events.append(event)
 
+            # Collect budget messages from CheckApproval
+            if hasattr(event, "author") and event.author == "CheckApproval":
+                if hasattr(event, "content") and event.content:
+                    if hasattr(event.content, "parts"):
+                        for part in event.content.parts:
+                            if hasattr(part, "text") and part.text:
+                                # Store the budget message
+                                budget_messages.append(part.text)
+
             # Print progress
+            # Note: Token tracking now handled internally by TrackingLoopAgent
             if hasattr(event, "author") and event.author:
                 if event.author in ["Researcher", "Validator"]:
                     print(f"  [{event.author}] generated response")
@@ -233,6 +246,7 @@ async def run_single_trial(
             metrics=metrics,
             correctness_score=correctness_score,
             duration_seconds=duration,
+            budget_messages=budget_messages,
         )
 
     except Exception as e:
@@ -278,6 +292,7 @@ async def run_single_trial(
             metrics=empty_metrics,
             correctness_score=empty_score,
             duration_seconds=duration,
+            budget_messages=[],
         )
 
 
