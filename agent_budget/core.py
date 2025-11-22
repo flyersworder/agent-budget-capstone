@@ -51,12 +51,17 @@ class TokenBudget:
 class AgentRole(Enum):
     """Roles in multi-agent teams (Part 2).
 
-    Each role has specific responsibilities in the sequential workflow.
+    Each role has specific responsibilities in the workflow.
     """
 
+    # Part 2 Original (Research workflow)
     RESEARCHER = "researcher"  # Gathers information using tools
     ANALYZER = "analyzer"  # Evaluates information for correctness
     SYNTHESIZER = "synthesizer"  # Produces final answer
+
+    # Part 2 Redesign (Code review workflow)
+    CODER = "coder"  # Writes/revises code
+    REVIEWER = "reviewer"  # Tests and reviews code
 
 
 class MultiAgentAwarenessCondition(Enum):

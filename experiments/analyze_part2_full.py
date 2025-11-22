@@ -1,6 +1,6 @@
 """Factorial analysis for Part 2 full study with bootstrap confidence intervals.
 
-Analyzes 2×4 factorial design: Difficulty (EASY/HARD) × Awareness (4 conditions)
+Analyzes 2×4 factorial design: Complexity (SIMPLE/COMPLEX) × Awareness (4 conditions)
 
 Key analyses:
 1. Main effects: Difficulty, Awareness
@@ -27,7 +27,7 @@ import numpy as np
 class FactorialCell:
     """Stats for one cell in the 2×4 factorial design."""
 
-    difficulty: str
+    complexity: str
     awareness: str
     n: int
     accuracy: float
@@ -47,17 +47,19 @@ class FactorialAnalysis:
     # Cell-level statistics
     cells: list[FactorialCell]
 
-    # Main effect: Difficulty
-    easy_accuracy: float
-    hard_accuracy: float
-    difficulty_effect: float  # HARD - EASY
-    difficulty_p_value: float
+    # Main effect: Complexity
+    simple_accuracy: float
+    complex_accuracy: float
+    complexity_effect: float  # COMPLEX - SIMPLE
+    complexity_p_value: float
 
     # Main effect: Awareness (vs NO_AWARENESS baseline)
     awareness_effects: dict[str, tuple[float, float]]  # condition -> (effect, p-value)
 
     # Interaction: Difficulty × Awareness
-    interaction_effect: float  # Difference in awareness effects between EASY and HARD
+    interaction_effect: (
+        float  # Difference in awareness effects between SIMPLE and COMPLEX
+    )
     interaction_p_value: float
 
     # Efficiency (tokens per correct answer)
@@ -199,24 +201,24 @@ def analyze_factorial(results: dict[str, Any]) -> FactorialAnalysis:
     trials = results["trials"]
 
     # Group trials by condition
-    by_difficulty = defaultdict(list)
+    by_complexity = defaultdict(list)
     by_awareness = defaultdict(list)
     by_cell = defaultdict(list)
 
     for trial in trials:
-        difficulty = trial["difficulty"]
+        complexity = trial["complexity"]
         awareness = trial["awareness_condition"]
         is_correct = trial["correctness_score"]["score"] == 1.0
         tokens = trial["metrics"]["total_tokens"]
         iterations = trial["num_iterations"]
 
-        by_difficulty[difficulty].append((is_correct, tokens, iterations))
+        by_complexity[complexity].append((is_correct, tokens, iterations))
         by_awareness[awareness].append((is_correct, tokens, iterations))
-        by_cell[(difficulty, awareness)].append((is_correct, tokens, iterations))
+        by_cell[(complexity, awareness)].append((is_correct, tokens, iterations))
 
     # Compute cell-level statistics
     cells = []
-    for (difficulty, awareness), cell_trials in by_cell.items():
+    for (complexity, awareness), cell_trials in by_cell.items():
         correct_count = sum(1 for c, _, _ in cell_trials if c)
         n = len(cell_trials)
 
@@ -237,7 +239,7 @@ def analyze_factorial(results: dict[str, Any]) -> FactorialAnalysis:
 
         cells.append(
             FactorialCell(
-                difficulty=difficulty,
+                complexity=complexity,
                 awareness=awareness,
                 n=n,
                 accuracy=acc,
@@ -252,14 +254,14 @@ def analyze_factorial(results: dict[str, Any]) -> FactorialAnalysis:
         )
 
     # Main effect: Difficulty
-    easy_correct = [c for c, _, _ in by_difficulty["EASY"]]
-    hard_correct = [c for c, _, _ in by_difficulty["HARD"]]
+    simple_correct = [c for c, _, _ in by_complexity["SIMPLE"]]
+    complex_correct = [c for c, _, _ in by_complexity["COMPLEX"]]
 
-    easy_acc = np.mean(easy_correct) if easy_correct else 0.0
-    hard_acc = np.mean(hard_correct) if hard_correct else 0.0
+    simple_acc = np.mean(simple_correct) if simple_correct else 0.0
+    complex_acc = np.mean(complex_correct) if complex_correct else 0.0
 
     diff_effect, diff_p = bootstrap_difference_test(
-        [float(c) for c in hard_correct], [float(c) for c in easy_correct]
+        [float(c) for c in complex_correct], [float(c) for c in simple_correct]
     )
 
     # Main effect: Awareness (each condition vs NO_AWARENESS baseline)
@@ -274,14 +276,14 @@ def analyze_factorial(results: dict[str, Any]) -> FactorialAnalysis:
         awareness_effects[awareness] = (effect, p_val)
 
     # Interaction: Difficulty × Awareness
-    # Compare awareness effect in EASY vs HARD
-    # Effect = (HARD_aware - HARD_baseline) - (EASY_aware - EASY_baseline)
+    # Compare awareness effect in SIMPLE vs COMPLEX
+    # Effect = (COMPLEX_aware - COMPLEX_baseline) - (SIMPLE_aware - SIMPLE_baseline)
 
     # For simplicity, test overall_only condition
-    easy_no = [c for c, _, _ in by_cell[("EASY", "no_awareness")] if True]
-    easy_aware = [c for c, _, _ in by_cell[("EASY", "overall_only")] if True]
-    hard_no = [c for c, _, _ in by_cell[("HARD", "no_awareness")] if True]
-    hard_aware = [c for c, _, _ in by_cell[("HARD", "overall_only")] if True]
+    easy_no = [c for c, _, _ in by_cell[("SIMPLE", "no_awareness")] if True]
+    easy_aware = [c for c, _, _ in by_cell[("SIMPLE", "overall_only")] if True]
+    hard_no = [c for c, _, _ in by_cell[("COMPLEX", "no_awareness")] if True]
+    hard_aware = [c for c, _, _ in by_cell[("COMPLEX", "overall_only")] if True]
 
     easy_effect = np.mean([float(c) for c in easy_aware]) - np.mean(
         [float(c) for c in easy_no]
@@ -298,15 +300,15 @@ def analyze_factorial(results: dict[str, Any]) -> FactorialAnalysis:
 
     # Efficiency by cell
     efficiency_by_cell = {
-        (cell.difficulty, cell.awareness): cell.tokens_per_correct for cell in cells
+        (cell.complexity, cell.awareness): cell.tokens_per_correct for cell in cells
     }
 
     return FactorialAnalysis(
         cells=cells,
-        easy_accuracy=easy_acc,
-        hard_accuracy=hard_acc,
-        difficulty_effect=diff_effect,
-        difficulty_p_value=diff_p,
+        simple_accuracy=simple_acc,
+        complex_accuracy=complex_acc,
+        complexity_effect=diff_effect,
+        complexity_p_value=diff_p,
         awareness_effects=awareness_effects,
         interaction_effect=interaction_effect,
         interaction_p_value=interaction_p,
@@ -324,7 +326,7 @@ def print_analysis(analysis: FactorialAnalysis, results: dict[str, Any]) -> None
     # Cell-level results table
     print("ACCURACY BY CONDITION (with 95% Bootstrap CIs)")
     print("-" * 80)
-    print(f"{'Condition':<30} {'EASY':>20} {'HARD':>20}")
+    print(f"{'Condition':<30} {'SIMPLE':>20} {'COMPLEX':>20}")
     print("-" * 80)
 
     # Group cells by awareness
@@ -342,10 +344,10 @@ def print_analysis(analysis: FactorialAnalysis, results: dict[str, Any]) -> None
         row_data = {}
         for cell in cells:
             acc_str = f"{cell.accuracy:.1%} [{cell.accuracy_ci_low:.1%}, {cell.accuracy_ci_high:.1%}]"
-            row_data[cell.difficulty] = acc_str
+            row_data[cell.complexity] = acc_str
 
         print(
-            f"{awareness.replace('_', ' ').title():<30} {row_data.get('EASY', 'N/A'):>20} {row_data.get('HARD', 'N/A'):>20}"
+            f"{awareness.replace('_', ' ').title():<30} {row_data.get('SIMPLE', 'N/A'):>20} {row_data.get('COMPLEX', 'N/A'):>20}"
         )
 
     print()
@@ -356,18 +358,18 @@ def print_analysis(analysis: FactorialAnalysis, results: dict[str, Any]) -> None
 
     # Difficulty effect
     print("Difficulty Effect:")
-    print(f"  EASY accuracy:  {analysis.easy_accuracy:.1%}")
-    print(f"  HARD accuracy:  {analysis.hard_accuracy:.1%}")
+    print(f"  SIMPLE accuracy:  {analysis.simple_accuracy:.1%}")
+    print(f"  COMPLEX accuracy:  {analysis.complex_accuracy:.1%}")
     print(
-        f"  Difference:     {analysis.difficulty_effect:+.1%} (p = {analysis.difficulty_p_value:.3f})"
+        f"  Difference:     {analysis.complexity_effect:+.1%} (p = {analysis.complexity_p_value:.3f})"
     )
     sig = (
         "***"
-        if analysis.difficulty_p_value < 0.001
+        if analysis.complexity_p_value < 0.001
         else "**"
-        if analysis.difficulty_p_value < 0.01
+        if analysis.complexity_p_value < 0.01
         else "*"
-        if analysis.difficulty_p_value < 0.05
+        if analysis.complexity_p_value < 0.05
         else "ns"
     )
     print(f"  Significance:   {sig}")
@@ -401,11 +403,11 @@ def print_analysis(analysis: FactorialAnalysis, results: dict[str, Any]) -> None
     print()
     print("Interpretation:")
     if analysis.interaction_effect > 0.05:
-        print("  Awareness effects are STRONGER for HARD tasks (+interaction)")
+        print("  Awareness effects are STRONGER for COMPLEX tasks (+interaction)")
     elif analysis.interaction_effect < -0.05:
-        print("  Awareness effects are STRONGER for EASY tasks (-interaction)")
+        print("  Awareness effects are STRONGER for SIMPLE tasks (-interaction)")
     else:
-        print("  Awareness effects are SIMILAR across difficulty levels")
+        print("  Awareness effects are SIMILAR across complexity levels")
 
     print()
     print("=" * 80)
@@ -413,7 +415,7 @@ def print_analysis(analysis: FactorialAnalysis, results: dict[str, Any]) -> None
     print("=" * 80)
     print()
 
-    print(f"{'Condition':<30} {'EASY':>15} {'HARD':>15}")
+    print(f"{'Condition':<30} {'SIMPLE':>15} {'COMPLEX':>15}")
     print("-" * 62)
 
     for awareness in [
@@ -422,8 +424,8 @@ def print_analysis(analysis: FactorialAnalysis, results: dict[str, Any]) -> None
         "overall_and_individual",
         "reserve_awareness",
     ]:
-        easy_eff = analysis.efficiency_by_cell.get(("EASY", awareness), 0)
-        hard_eff = analysis.efficiency_by_cell.get(("HARD", awareness), 0)
+        easy_eff = analysis.efficiency_by_cell.get(("SIMPLE", awareness), 0)
+        hard_eff = analysis.efficiency_by_cell.get(("COMPLEX", awareness), 0)
         print(
             f"{awareness.replace('_', ' ').title():<30} {easy_eff:>15.0f} {hard_eff:>15.0f}"
         )
@@ -508,7 +510,7 @@ def save_analysis(analysis: FactorialAnalysis, output_path: str) -> None:
     output_data = {
         "cells": [
             {
-                "difficulty": c.difficulty,
+                "complexity": c.complexity,
                 "awareness": c.awareness,
                 "n": c.n,
                 "accuracy": c.accuracy,
@@ -521,11 +523,11 @@ def save_analysis(analysis: FactorialAnalysis, output_path: str) -> None:
             for c in analysis.cells
         ],
         "main_effects": {
-            "difficulty": {
-                "easy_accuracy": analysis.easy_accuracy,
-                "hard_accuracy": analysis.hard_accuracy,
-                "effect": analysis.difficulty_effect,
-                "p_value": analysis.difficulty_p_value,
+            "complexity": {
+                "simple_accuracy": analysis.simple_accuracy,
+                "complex_accuracy": analysis.complex_accuracy,
+                "effect": analysis.complexity_effect,
+                "p_value": analysis.complexity_p_value,
             },
             "awareness": {
                 cond: {"effect": eff, "p_value": p}
