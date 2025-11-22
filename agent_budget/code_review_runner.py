@@ -24,17 +24,17 @@ import subprocess
 import tempfile
 import os
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator
+from typing import Any
 
-from google.adk.agents import LlmAgent, BaseAgent, LoopAgent
-from google.adk.events import Event, EventActions
-from google.adk.agents.invocation_context import InvocationContext
+from google.adk.agents import LlmAgent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.adk.tools import google_search, FunctionTool
 from google.genai import types
 
 from agent_budget.core import MultiAgentAwarenessCondition
+from agent_budget.tracking_loop_agent import TrackingLoopAgent
+from agent_budget.loop_agents import CheckApprovalAgent
 
 
 @dataclass
@@ -100,38 +100,6 @@ def execute_python_code(code: str) -> str:
             os.unlink(temp_file)
 
 
-class CheckApprovalAgent(BaseAgent):  # type: ignore[misc]
-    """Custom agent that checks for APPROVE decision and escalates to exit loop.
-
-    Examines state['review_decision'] for "APPROVE" keyword.
-    If found, signals LoopAgent to terminate by escalating.
-    """
-
-    async def _run_async_impl(
-        self, ctx: InvocationContext
-    ) -> AsyncGenerator[Event, None]:
-        """Check state for approval and escalate if found.
-
-        Args:
-            ctx: Invocation context with session state
-
-        Yields:
-            Event with escalate flag if approved
-        """
-        # Get review decision from state
-        decision = ctx.session.state.get("review_decision", "")
-
-        # Check if approval keyword present
-        approved = "APPROVE" in str(decision).upper()
-
-        # Yield event with escalate flag
-        # escalate=True signals LoopAgent to exit
-        yield Event(
-            author=self.name,
-            actions=EventActions(escalate=approved),
-        )
-
-
 async def run_code_review_trial(
     problem: dict[str, Any],
     awareness_condition: MultiAgentAwarenessCondition,
@@ -190,8 +158,13 @@ finally:
         os.unlink(temp_file)
 """
 
-    # Generate budget awareness message
-    budget_message = _generate_budget_message(awareness_condition, max_iterations)
+    # Generate budget awareness messages for each agent
+    coder_budget_message = _generate_budget_message(
+        awareness_condition, max_iterations, agent_role="Coder"
+    )
+    reviewer_budget_message = _generate_budget_message(
+        awareness_condition, max_iterations, agent_role="Reviewer"
+    )
 
     # Create Coder agent with state integration
     # Feedback comes through conversation history, not state variables
@@ -199,7 +172,7 @@ finally:
         model="gemini-2.5-flash-lite",
         name="Coder",
         description="Writes or revises Python code to solve programming problems",
-        instruction=f"""{budget_message}
+        instruction=f"""{coder_budget_message}
 
 Problem to solve:
 {problem["question_content"]}
@@ -217,7 +190,7 @@ Return ONLY the program code, no explanations.""",
         model="gemini-2.5-flash-lite",
         name="Reviewer",
         description="Tests and reviews code using code execution",
-        instruction=f"""{budget_message}
+        instruction=f"""{reviewer_budget_message}
 
 Review the following code:
 
@@ -242,13 +215,29 @@ Be concise but thorough.""",
     )
 
     # Create CheckApproval agent
+    # Budget values for status reporting
+    coder_budget_total = 1200  # 60% of 2000
+    reviewer_budget_total = 800  # 40% of 2000
+    team_budget_total = 2000
+
+    report_usage = awareness_condition != MultiAgentAwarenessCondition.NO_AWARENESS
+
     approval_checker = CheckApprovalAgent(
         name="ApprovalChecker",
         description="Checks review decision and escalates if approved",
+        report_usage=report_usage,
+        awareness_condition=awareness_condition,
+        researcher_budget_total=coder_budget_total,  # Using researcher param for coder
+        validator_budget_total=reviewer_budget_total,  # Using validator param for reviewer
+        team_budget_total=team_budget_total,
+        agent1_name="Coder",
+        agent2_name="Reviewer",
+        approval_state_key="review_decision",
+        approval_keyword="APPROVE",
     )
 
-    # Create LoopAgent for iterative refinement
-    review_loop = LoopAgent(
+    # Create TrackingLoopAgent for iterative refinement with token tracking
+    review_loop = TrackingLoopAgent(
         name="CodeReviewLoop",
         description="Iteratively refines code through Coder-Reviewer collaboration",
         max_iterations=max_iterations,
@@ -328,12 +317,14 @@ Be concise but thorough.""",
 def _generate_budget_message(
     awareness_condition: MultiAgentAwarenessCondition,
     max_iterations: int,
+    agent_role: str = "",
 ) -> str:
     """Generate budget awareness message for agents.
 
     Args:
         awareness_condition: Budget awareness level
         max_iterations: Maximum iterations
+        agent_role: Agent role ("Coder" or "Reviewer")
 
     Returns:
         str: Budget message (empty for NO_AWARENESS)
@@ -341,8 +332,22 @@ def _generate_budget_message(
     if awareness_condition == MultiAgentAwarenessCondition.NO_AWARENESS:
         return ""
 
-    # For now, simple awareness message
-    # TODO: Implement full budget tracking with limits
+    # Budget allocation (total 2000 tokens)
+    team_total = 2000
+    coder_budget = 1200  # 60%
+    reviewer_budget = 800  # 40%
+
+    if awareness_condition == MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL:
+        # Role-specific message with individual and team awareness
+        agent_budget = coder_budget if agent_role == "Coder" else reviewer_budget
+        return f"""[BUDGET AWARENESS]
+Your team has a total budget of {team_total} tokens for this task.
+Your individual allocation: {agent_budget} tokens
+Maximum {max_iterations} iterations available.
+Use tokens wisely - be concise and focused.
+"""
+
+    # Fallback for other conditions (not used in clean 2x2 design)
     return f"""[BUDGET AWARENESS]
 You are working in a team with a limited token budget.
 Maximum {max_iterations} iterations available.

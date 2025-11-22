@@ -60,6 +60,8 @@ class TrackingLoopAgent(LoopAgent):  # type: ignore[misc]
                         if hasattr(event, "author") and event.author in [
                             "Researcher",
                             "Validator",
+                            "Coder",
+                            "Reviewer",
                         ]:
                             thinking, output = extract_token_usage(event)
                             if thinking + output > 0:

@@ -48,26 +48,55 @@ async def main():
     print("Testing with NO_AWARENESS condition...")
     print("-" * 80)
 
-    result = await run_code_review_trial(
+    result_no_awareness = await run_code_review_trial(
         problem=problem,
         awareness_condition=MultiAgentAwarenessCondition.NO_AWARENESS,
         max_iterations=3,
     )
 
-    print("\nRESULTS:")
-    print(f"  Success: {result.success}")
-    print(f"  Iterations: {result.num_iterations}")
-    print(f"  Final decision: {result.final_decision}")
-    print(f"  Team total tokens: {result.team_total_tokens:,}")
-    print(f"  Test passed: {result.test_passed}")
+    print("\nRESULTS (NO_AWARENESS):")
+    print(f"  Success: {result_no_awareness.success}")
+    print(f"  Iterations: {result_no_awareness.num_iterations}")
+    print(f"  Final decision: {result_no_awareness.final_decision}")
+    print(f"  Team total tokens: {result_no_awareness.team_total_tokens:,}")
+    print(f"  Test passed: {result_no_awareness.test_passed}")
     print()
     print("  Iteration history:")
-    for iter_data in result.iterations:
+    for iter_data in result_no_awareness.iterations:
+        print(f"    Iteration {iter_data['iteration']}: {iter_data['status']}")
+
+    # Test OVERALL_AND_INDIVIDUAL condition
+    print("\n" + "=" * 80)
+    print("Testing with OVERALL_AND_INDIVIDUAL condition...")
+    print("-" * 80)
+
+    result_aware = await run_code_review_trial(
+        problem=problem,
+        awareness_condition=MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL,
+        max_iterations=3,
+    )
+
+    print("\nRESULTS (OVERALL_AND_INDIVIDUAL):")
+    print(f"  Success: {result_aware.success}")
+    print(f"  Iterations: {result_aware.num_iterations}")
+    print(f"  Final decision: {result_aware.final_decision}")
+    print(f"  Team total tokens: {result_aware.team_total_tokens:,}")
+    print(f"  Test passed: {result_aware.test_passed}")
+    print()
+    print("  Iteration history:")
+    for iter_data in result_aware.iterations:
         print(f"    Iteration {iter_data['iteration']}: {iter_data['status']}")
 
     print("\n" + "=" * 80)
     print("MODULE TEST COMPLETE")
     print("=" * 80)
+    print("\nComparison:")
+    print(
+        f"  NO_AWARENESS: {result_no_awareness.num_iterations} iterations, {result_no_awareness.team_total_tokens} tokens"
+    )
+    print(
+        f"  AWARE: {result_aware.num_iterations} iterations, {result_aware.team_total_tokens} tokens"
+    )
 
 
 if __name__ == "__main__":

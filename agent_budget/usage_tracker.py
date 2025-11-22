@@ -93,7 +93,11 @@ def format_usage_status(session: Session, agent_name: str, budget_total: int) ->
 - Budget per call: {budget_total} tokens"""
 
 
-def report_team_usage_from_state(state: dict[str, Any]) -> str:
+def report_team_usage_from_state(
+    state: dict[str, Any],
+    agent1_name: str = "Researcher",
+    agent2_name: str = "Validator",
+) -> str:
     """Report cumulative team token usage from session state.
 
     This function is meant to be called by a UsageReporter agent
@@ -101,21 +105,23 @@ def report_team_usage_from_state(state: dict[str, Any]) -> str:
 
     Args:
         state: Session state dictionary
+        agent1_name: Name of first agent (default: "Researcher")
+        agent2_name: Name of second agent (default: "Validator")
 
     Returns:
         Formatted usage report string
     """
-    r_total = state.get("researcher_total_tokens", 0)
-    v_total = state.get("validator_total_tokens", 0)
-    team_total = r_total + v_total
+    agent1_total = state.get(f"{agent1_name.lower()}_total_tokens", 0)
+    agent2_total = state.get(f"{agent2_name.lower()}_total_tokens", 0)
+    team_total = agent1_total + agent2_total
 
     if team_total == 0:
         return "[BUDGET USAGE] This is iteration 1 - no tokens used yet."
 
     return f"""[BUDGET USAGE UPDATE]
 Cumulative token usage across all iterations so far:
-- Researcher: {r_total} tokens
-- Validator: {v_total} tokens
+- {agent1_name}: {agent1_total} tokens
+- {agent2_name}: {agent2_total} tokens
 - Team total: {team_total} tokens
 
 This information is for your awareness. Continue with your task."""

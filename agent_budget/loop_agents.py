@@ -36,6 +36,10 @@ class CheckApprovalAgent(BaseAgent):  # type: ignore[misc]
         researcher_budget_total: int = 0,
         validator_budget_total: int = 0,
         team_budget_total: int = 0,
+        agent1_name: str = "Researcher",
+        agent2_name: str = "Validator",
+        approval_state_key: str = "validator_feedback",
+        approval_keyword: str = "APPROVED",
     ):
         """Initialize CheckApprovalAgent.
 
@@ -44,9 +48,13 @@ class CheckApprovalAgent(BaseAgent):  # type: ignore[misc]
             description: Agent description
             report_usage: Whether to report token usage (default: True)
             awareness_condition: Level of budget awareness to report
-            researcher_budget_total: Researcher's total budget per call
-            validator_budget_total: Validator's total budget per call
+            researcher_budget_total: Researcher's total budget per call (agent1)
+            validator_budget_total: Validator's total budget per call (agent2)
             team_budget_total: Team's total budget
+            agent1_name: Name of first agent (default: "Researcher")
+            agent2_name: Name of second agent (default: "Validator")
+            approval_state_key: State key to check for approval (default: "validator_feedback")
+            approval_keyword: Keyword indicating approval (default: "APPROVED")
         """
         super().__init__(name=name, description=description)
         # Store as private attributes to avoid Pydantic field validation
@@ -55,6 +63,10 @@ class CheckApprovalAgent(BaseAgent):  # type: ignore[misc]
         object.__setattr__(self, "_researcher_budget_total", researcher_budget_total)
         object.__setattr__(self, "_validator_budget_total", validator_budget_total)
         object.__setattr__(self, "_team_budget_total", team_budget_total)
+        object.__setattr__(self, "_agent1_name", agent1_name)
+        object.__setattr__(self, "_agent2_name", agent2_name)
+        object.__setattr__(self, "_approval_state_key", approval_state_key)
+        object.__setattr__(self, "_approval_keyword", approval_keyword)
 
     async def _run_async_impl(
         self, ctx: InvocationContext
@@ -70,8 +82,11 @@ class CheckApprovalAgent(BaseAgent):  # type: ignore[misc]
         # Report token usage if enabled
         usage_message = ""
         if getattr(self, "_report_usage", True):
-            r_total = ctx.session.state.get("researcher_total_tokens", 0)
-            v_total = ctx.session.state.get("validator_total_tokens", 0)
+            agent1_name = getattr(self, "_agent1_name", "Researcher")
+            agent2_name = getattr(self, "_agent2_name", "Validator")
+
+            r_total = ctx.session.state.get(f"{agent1_name.lower()}_total_tokens", 0)
+            v_total = ctx.session.state.get(f"{agent2_name.lower()}_total_tokens", 0)
             team_total = r_total + v_total
 
             if team_total > 0:
@@ -81,12 +96,14 @@ class CheckApprovalAgent(BaseAgent):  # type: ignore[misc]
                     team_total=team_total,
                 )
 
-        # Get validator feedback from state
-        # Always check 'validator_feedback' key for 'APPROVED' keyword
-        feedback = ctx.session.state.get("validator_feedback", "")
+        # Get approval feedback from state using configured key
+        approval_state_key = getattr(self, "_approval_state_key", "validator_feedback")
+        approval_keyword = getattr(self, "_approval_keyword", "APPROVED")
+
+        feedback = ctx.session.state.get(approval_state_key, "")
 
         # Check if approval keyword present
-        approved = "APPROVED" in str(feedback)
+        approved = approval_keyword in str(feedback).upper()
 
         # Yield event with usage message and escalate flag
         # escalate=True signals LoopAgent to exit
@@ -128,23 +145,25 @@ class CheckApprovalAgent(BaseAgent):  # type: ignore[misc]
         r_budget = getattr(self, "_researcher_budget_total", 0)
         v_budget = getattr(self, "_validator_budget_total", 0)
         team_budget = getattr(self, "_team_budget_total", 0)
+        agent1_name = getattr(self, "_agent1_name", "Researcher")
+        agent2_name = getattr(self, "_agent2_name", "Validator")
 
         lines = ["[BUDGET STATUS]"]
 
         # Individual agent details (for OVERALL_AND_INDIVIDUAL)
         if awareness == MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL:
-            # Researcher
+            # Agent 1
             r_pct = (r_total / r_budget * 100) if r_budget > 0 else 0
             r_remaining = max(0, r_budget - r_total)
             lines.append(
-                f"Researcher: {r_total:,} / {r_budget:,} tokens ({r_pct:.0f}% used, {r_remaining:,} remaining)"
+                f"{agent1_name}: {r_total:,} / {r_budget:,} tokens ({r_pct:.0f}% used, {r_remaining:,} remaining)"
             )
 
-            # Validator
+            # Agent 2
             v_pct = (v_total / v_budget * 100) if v_budget > 0 else 0
             v_remaining = max(0, v_budget - v_total)
             lines.append(
-                f"Validator: {v_total:,} / {v_budget:,} tokens ({v_pct:.0f}% used, {v_remaining:,} remaining)"
+                f"{agent2_name}: {v_total:,} / {v_budget:,} tokens ({v_pct:.0f}% used, {v_remaining:,} remaining)"
             )
             lines.append("")
 
