@@ -424,10 +424,10 @@ async def main() -> None:
     print("=" * 80)
     print()
     print("Design:")
-    print("  - 50 questions (stratified by category)")
+    print("  - 100 questions (stratified by category)")
     print("  - Budget level: Between-subjects (tight/moderate/comfortable)")
     print("  - Awareness: Within-subjects (each question tested in BOTH conditions)")
-    print("  - Total: 50 questions × 2 conditions = 100 data points")
+    print("  - Total: 100 questions × 2 conditions = 200 data points")
     print()
     print("Advantages:")
     print("  ✓ Eliminates question difficulty confounding")
@@ -440,7 +440,7 @@ async def main() -> None:
 
     # Run study
     runner = Part1WithinSubjectsRunner()
-    suite = await runner.run_within_subjects_study(n_questions=50, seed=100)
+    suite = await runner.run_within_subjects_study(n_questions=100, seed=500)
 
     # Print summary
     print()

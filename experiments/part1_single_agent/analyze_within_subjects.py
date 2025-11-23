@@ -198,7 +198,9 @@ def analyze_main_effect(results: list[dict[str, Any]]) -> None:
 
     # Sign test (non-parametric)
     sign_stat = sum(1 for diff in differences if diff > 0)
-    sign_p = stats.binom_test(sign_stat, len(differences), 0.5, alternative="two-sided")
+    sign_p = stats.binomtest(
+        sign_stat, len(differences), 0.5, alternative="two-sided"
+    ).pvalue
     print("  Sign test:")
     print(f"    Positive differences: {sign_stat}/{len(differences)}")
     print(
