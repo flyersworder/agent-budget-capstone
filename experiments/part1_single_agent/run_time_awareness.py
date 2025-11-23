@@ -20,7 +20,7 @@ Usage:
 import asyncio
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -116,13 +116,9 @@ class TimeAwarenessSuite:
         completed_at: Suite completion timestamp
     """
 
-    results: list[TimeAwarenessResult] = None
+    results: list[TimeAwarenessResult] = field(default_factory=list)
     started_at: str | None = None
     completed_at: str | None = None
-
-    def __post_init__(self):
-        if self.results is None:
-            self.results = []
 
     def get_pairs(
         self,
@@ -506,7 +502,9 @@ async def main() -> None:
             time_diff = (
                 aware.metrics.duration_seconds - unaware.metrics.duration_seconds
             )
-            search_diff = aware.metrics.total_tool_calls - unaware.metrics.total_tool_calls
+            search_diff = (
+                aware.metrics.total_tool_calls - unaware.metrics.total_tool_calls
+            )
             accuracy_diffs.append(acc_diff)
             time_diffs.append(time_diff)
             search_diffs.append(search_diff)
@@ -518,9 +516,7 @@ async def main() -> None:
             f"  Accuracy: {np.mean(accuracy_diffs):+.3f} ± {np.std(accuracy_diffs):.3f}"
         )
         print(f"  Time:     {np.mean(time_diffs):+.1f}s ± {np.std(time_diffs):.1f}s")
-        print(
-            f"  Searches: {np.mean(search_diffs):+.1f} ± {np.std(search_diffs):.1f}"
-        )
+        print(f"  Searches: {np.mean(search_diffs):+.1f} ± {np.std(search_diffs):.1f}")
         print()
 
         # Count wins
@@ -540,9 +536,15 @@ async def main() -> None:
         same_searches = sum(1 for d in search_diffs if d == 0)
 
         print("Search Behavior (Time-aware vs Unaware):")
-        print(f"  Fewer searches: {fewer_searches} ({100*fewer_searches/len(pairs):.1f}%)")
-        print(f"  More searches:  {more_searches} ({100*more_searches/len(pairs):.1f}%)")
-        print(f"  Same searches:  {same_searches} ({100*same_searches/len(pairs):.1f}%)")
+        print(
+            f"  Fewer searches: {fewer_searches} ({100 * fewer_searches / len(pairs):.1f}%)"
+        )
+        print(
+            f"  More searches:  {more_searches} ({100 * more_searches / len(pairs):.1f}%)"
+        )
+        print(
+            f"  Same searches:  {same_searches} ({100 * same_searches / len(pairs):.1f}%)"
+        )
         print()
 
     # Save results
