@@ -1,6 +1,7 @@
 """Test the Part 2 module with a single LiveCodeBench problem."""
 
 import asyncio
+import logging
 from datetime import datetime
 
 from datasets import load_dataset
@@ -8,6 +9,12 @@ from dotenv import load_dotenv
 
 from agent_budget.core import MultiAgentAwarenessCondition
 from agent_budget.code_review_runner import run_code_review_trial
+
+# Set up detailed logging
+logging.basicConfig(
+    level=logging.INFO,  # INFO level for cleaner output
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 
 
 async def main():
@@ -51,7 +58,7 @@ async def main():
     result_no_awareness = await run_code_review_trial(
         problem=problem,
         awareness_condition=MultiAgentAwarenessCondition.NO_AWARENESS,
-        max_iterations=3,
+        max_iterations=1,  # Just 1 iteration for detailed logging
     )
 
     print("\nRESULTS (NO_AWARENESS):")
@@ -73,7 +80,7 @@ async def main():
     result_aware = await run_code_review_trial(
         problem=problem,
         awareness_condition=MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL,
-        max_iterations=3,
+        max_iterations=1,  # Just 1 iteration for detailed logging
     )
 
     print("\nRESULTS (OVERALL_AND_INDIVIDUAL):")
