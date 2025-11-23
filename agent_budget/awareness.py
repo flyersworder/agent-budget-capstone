@@ -160,8 +160,6 @@ def create_aware_instruction_reframed(
     Returns:
         Instruction string with positive budget framing
     """
-    total_budget = thinking_budget + max_output_tokens
-
     return f"""<critical_instruction>
 You MUST provide a direct, factual answer to the question.
 Do NOT describe your thought process or explain how you will find the answer.
@@ -226,8 +224,6 @@ def create_aware_instruction_mechanistic(
     Returns:
         Instruction string with mechanistic budget explanation
     """
-    total_budget = thinking_budget + max_output_tokens
-
     return f"""<critical_instruction>
 You MUST provide a direct, factual answer to the question.
 Do NOT describe your thought process or explain how you will find the answer.
