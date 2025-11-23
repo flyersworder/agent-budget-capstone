@@ -6,7 +6,7 @@ Tests:
 3. Basic functionality of pairwise comparison
 """
 
-from experiments.evaluator import LLMResponseEvaluator
+from experiments.shared.evaluator import LLMResponseEvaluator
 from experiments.tasks import ResearchTask
 
 

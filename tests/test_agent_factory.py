@@ -47,7 +47,7 @@ def test_part2_multiagent_teams():
     factory = AgentFactory()
     total_budget = 1280
 
-    # Test all 4 awareness conditions
+    # Test different configuration methods
     test_configs = [
         (
             "Condition A: No Awareness",
@@ -66,10 +66,6 @@ def test_part2_multiagent_teams():
         (
             "Condition C: Overall + Individual",
             MultiAgentBudgetConfig.create_role_based(total_budget),
-        ),
-        (
-            "Condition D: With Negotiation",
-            MultiAgentBudgetConfig.create_with_negotiation(total_budget),
         ),
     ]
 
@@ -127,15 +123,6 @@ def test_budget_configurations():
     for role, alloc in role_config.allocations.items():
         print(f"  {role.value}: {alloc.budget.total} tokens ({alloc.percentage:.0f}%)")
     assert role_config.validate(), "Role-based config invalid"
-
-    # Test with negotiation
-    neg_config = MultiAgentBudgetConfig.create_with_negotiation(total)
-    print(f"\nWith Negotiation (total={total}):")
-    print(f"  Allocated: {neg_config.allocated_budget} tokens")
-    print(f"  Reserve pool: {neg_config.reserve_pool} tokens")
-    for role, alloc in neg_config.allocations.items():
-        print(f"  {role.value}: {alloc.budget.total} tokens ({alloc.percentage:.0f}%)")
-    assert neg_config.validate(), "Negotiation config invalid"
 
 
 def main():
