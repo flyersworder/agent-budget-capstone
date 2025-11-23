@@ -18,7 +18,15 @@ from google.adk.tools.tool_context import ToolContext
 from google.genai import types
 
 from .awareness import AwarenessCondition
+from .code_review_prompts import (
+    generate_budget_message,
+    generate_coder_instruction,
+    generate_reviewer_instruction,
+)
 from .core import (
+    CODE_REVIEW_CODER_BUDGET,
+    CODE_REVIEW_REVIEWER_BUDGET,
+    CODE_REVIEW_TEAM_BUDGET,
     AgentRole,
     IterativeTeamConfig,
     MultiAgentAwarenessCondition,
@@ -750,4 +758,109 @@ class AgentFactory:
             description="Iterative 2-agent team with Researcher ⇄ Validator loop",
             sub_agents=[researcher, validator, check_approval],
             max_iterations=team_config.max_iterations,
+        )
+
+    # ========================================================================
+    # PART 2: Code Review Team Creation
+    # ========================================================================
+
+    def create_code_review_team(
+        self,
+        problem_description: str,
+        test_code_tool: FunctionTool,
+        awareness_condition: MultiAgentAwarenessCondition = MultiAgentAwarenessCondition.NO_AWARENESS,
+        max_iterations: int = 3,
+    ) -> TrackingLoopAgent:
+        """Create code review team for iterative Coder-Reviewer workflow.
+
+        Creates a TrackingLoopAgent with iterative Coder ⇄ Reviewer workflow:
+        1. Coder writes/revises Python code with thinking mode
+        2. Reviewer tests code and either approves or provides feedback
+        3. CheckApproval checks for approval and exits loop if found
+        4. Loop repeats up to max_iterations times
+
+        Args:
+            problem_description: The programming problem to solve
+            test_code_tool: FunctionTool for testing code (problem-specific)
+            awareness_condition: Budget awareness level
+            max_iterations: Maximum iterations (default: 3)
+
+        Returns:
+            TrackingLoopAgent with Coder, Reviewer, and CheckApproval agents
+        """
+        # Generate budget awareness messages
+        coder_budget_message = generate_budget_message(
+            awareness_condition, max_iterations, agent_role="Coder"
+        )
+        reviewer_budget_message = generate_budget_message(
+            awareness_condition, max_iterations, agent_role="Reviewer"
+        )
+
+        # Create Coder agent
+        coder_instruction = generate_coder_instruction(
+            problem_description=problem_description,
+            budget_message=coder_budget_message,
+        )
+
+        coder = LlmAgent(
+            model=self.model,
+            name="Coder",
+            description="Writes or revises Python code to solve programming problems",
+            instruction=coder_instruction,
+            output_key="current_code",  # Automatically saves to session state
+            tools=[],  # No tools - just write code directly
+            planner=BuiltInPlanner(
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=CODE_REVIEW_CODER_BUDGET.reasoning_tokens,
+                    include_thoughts=True,
+                )
+            ),
+            generate_content_config=types.GenerateContentConfig(
+                max_output_tokens=CODE_REVIEW_CODER_BUDGET.total,
+                temperature=0.2,
+            ),
+        )
+
+        # Create Reviewer agent
+        reviewer_instruction = generate_reviewer_instruction(
+            budget_message=reviewer_budget_message,
+        )
+
+        reviewer = LlmAgent(
+            model=self.model,
+            name="Reviewer",
+            description="Tests and reviews code using code execution",
+            instruction=reviewer_instruction,
+            output_key="review_decision",  # Saves decision to state
+            tools=[test_code_tool],
+            # No thinking mode for Reviewer - straightforward task
+            generate_content_config=types.GenerateContentConfig(
+                max_output_tokens=CODE_REVIEW_REVIEWER_BUDGET.total,
+                temperature=0.2,
+            ),
+        )
+
+        # Create CheckApproval agent
+        report_usage = awareness_condition != MultiAgentAwarenessCondition.NO_AWARENESS
+
+        approval_checker = CheckApprovalAgent(
+            name="ApprovalChecker",
+            description="Checks review decision and escalates if approved",
+            report_usage=report_usage,
+            awareness_condition=awareness_condition,
+            researcher_budget_total=CODE_REVIEW_CODER_BUDGET.total,
+            validator_budget_total=CODE_REVIEW_REVIEWER_BUDGET.total,
+            team_budget_total=CODE_REVIEW_TEAM_BUDGET,
+            agent1_name="Coder",
+            agent2_name="Reviewer",
+            approval_state_key="review_decision",
+            approval_keyword="APPROVE",
+        )
+
+        # Create TrackingLoopAgent
+        return TrackingLoopAgent(
+            name="CodeReviewLoop",
+            description="Iteratively refines code through Coder-Reviewer collaboration",
+            sub_agents=[coder, reviewer, approval_checker],
+            max_iterations=max_iterations,
         )

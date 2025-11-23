@@ -1,24 +1,9 @@
-"""Experiments package for Part 2 multi-agent coordination experiments."""
+"""Experiments package for agent budget research.
 
-# NOTE: Old Part 1 imports commented out - they reference removed AllocationStrategy
-# from .runner import ExperimentRunner, ExperimentResult, ExperimentSuite
-# from .evaluator import (
-#     ResponseEvaluator,
-#     LLMResponseEvaluator,
-#     StrategyScore,
-#     PairwiseResult,
-#     DimensionScore,
-#     AggregatedScore,
-# )
-
-__all__ = [
-    # "ExperimentRunner",
-    # "ExperimentResult",
-    # "ExperimentSuite",
-    # "ResponseEvaluator",
-    # "LLMResponseEvaluator",
-    # "StrategyScore",
-    # "PairwiseResult",
-    # "DimensionScore",
-    # "AggregatedScore",
-]
+This package contains:
+- part1_single_agent: Single-agent budget awareness experiments
+- part2_multi_agent: Multi-agent coordination experiments
+- shared: Shared utilities (evaluators, validators)
+- tasks: Task definitions (TruthfulQA, HotpotQA)
+- exploratory: Exploratory analyses and prototypes
+"""

@@ -282,6 +282,27 @@ class MultiAgentBudgetConfig:
 
 
 # ============================================================================
+# PART 2: Code Review Team Configuration
+# ============================================================================
+
+# Standard code review budgets (optimized from testing)
+# Total team budget: 5200 tokens
+# Coder: 60% reasoning, 40% output (needs thinking for code generation)
+# Reviewer: Large budget for function calls and decision output
+CODE_REVIEW_CODER_BUDGET = TokenBudget(
+    reasoning_tokens=800,  # Thinking for code design
+    output_tokens=400,  # Code output
+)  # 1200 total (23% of team)
+
+CODE_REVIEW_REVIEWER_BUDGET = TokenBudget(
+    reasoning_tokens=2600,  # Thinking for review (65% of reviewer budget)
+    output_tokens=1400,  # Function call + decision output (35%)
+)  # 4000 total (77% of team)
+
+CODE_REVIEW_TEAM_BUDGET = 5200  # Total budget for Coder + Reviewer
+
+
+# ============================================================================
 # PART 2: Iterative 2-Agent Team Configuration
 # ============================================================================
 

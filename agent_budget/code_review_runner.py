@@ -26,16 +26,13 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-from google.adk.agents import LlmAgent
-from google.adk.planners import BuiltInPlanner
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.adk.tools import FunctionTool
 from google.genai import types
 
+from agent_budget.agent_factory import AgentFactory
 from agent_budget.core import MultiAgentAwarenessCondition
-from agent_budget.tracking_loop_agent import TrackingLoopAgent
-from agent_budget.loop_agents import CheckApprovalAgent
 
 
 @dataclass
@@ -187,110 +184,16 @@ async def run_code_review_trial(
             if os.path.exists(temp_file):
                 os.unlink(temp_file)
 
-    # Generate budget awareness messages for each agent
-    coder_budget_message = _generate_budget_message(
-        awareness_condition, max_iterations, agent_role="Coder"
-    )
-    reviewer_budget_message = _generate_budget_message(
-        awareness_condition, max_iterations, agent_role="Reviewer"
-    )
-
-    # Create Coder agent with state integration
-    # Feedback comes through conversation history, not state variables
-    coder_budget_total = 1200  # 60% of 2000
-    coder_thinking_budget = 800  # Thinking/reasoning tokens
-
-    coder = LlmAgent(
-        model="gemini-2.5-flash-lite",
-        name="Coder",
-        description="Writes or revises Python code to solve programming problems",
-        instruction=f"""{coder_budget_message}
-
-YOU ARE A PYTHON CODE GENERATOR. Your ONLY job is to write Python code.
-
-Problem to solve:
-{problem["question_content"]}
-
-INSTRUCTIONS:
-1. Write a complete, working Python program
-2. The program must read input from stdin
-3. The program must write output to stdout
-4. If you see review feedback in the conversation history, FIX the code based on that feedback
-5. Return ONLY executable Python code - NO explanations, NO markdown, NO comments outside the code
-
-Your response should be pure Python code that can be executed immediately.""",
-        output_key="current_code",  # Automatically saves to session state
-        tools=[],  # No tools - just write code directly
-        planner=BuiltInPlanner(
-            thinking_config=types.ThinkingConfig(
-                thinking_budget=coder_thinking_budget,
-                include_thoughts=True,
-            )
-        ),
-        generate_content_config=types.GenerateContentConfig(
-            max_output_tokens=coder_budget_total,  # Total tokens (thinking + output)
-            temperature=0.2,
-        ),
-    )
-
-    # Create Reviewer agent with state integration
+    # Create test_code tool for this specific problem
     test_code_tool = FunctionTool(func=test_code)
-    reviewer_budget_total = (
-        4000  # Testing hypothesis: increase significantly to ensure tokens available
-    )
-    # Function call with full code takes ~700-1200 tokens, need room for decision text
 
-    reviewer = LlmAgent(
-        model="gemini-2.5-flash-lite",
-        name="Reviewer",
-        description="Tests and reviews code using code execution",
-        instruction=f"""{reviewer_budget_message}
-
-Your task: Test the code and make a decision.
-
-CRITICAL: You MUST use the test_code function. Do NOT write code yourself.
-
-Step 1: Call test_code() - it will automatically test the Coder's code
-Step 2: Based on the test result, output your decision
-
-After calling test_code, output:
-DECISION: APPROVE or REQUEST_REVISION
-FEEDBACK: [what the test showed]""",
-        output_key="review_decision",  # Saves decision to state
-        tools=[test_code_tool],
-        # No thinking mode for Reviewer - straightforward task (run test, report result)
-        generate_content_config=types.GenerateContentConfig(
-            max_output_tokens=reviewer_budget_total,  # 800 tokens for tool use + decision
-            temperature=0.2,
-        ),
-    )
-
-    # Create CheckApproval agent
-    # Budget values for status reporting
-    team_budget_total = coder_budget_total + reviewer_budget_total  # 1200 + 2000 = 3200
-
-    report_usage = awareness_condition != MultiAgentAwarenessCondition.NO_AWARENESS
-
-    approval_checker = CheckApprovalAgent(
-        name="ApprovalChecker",
-        description="Checks review decision and escalates if approved",
-        report_usage=report_usage,
+    # Use factory to create code review team
+    factory = AgentFactory(model="gemini-2.5-flash-lite")
+    review_loop = factory.create_code_review_team(
+        problem_description=problem["question_content"],
+        test_code_tool=test_code_tool,
         awareness_condition=awareness_condition,
-        researcher_budget_total=coder_budget_total,  # Using researcher param for coder
-        validator_budget_total=reviewer_budget_total,  # Using validator param for reviewer
-        team_budget_total=team_budget_total,
-        agent1_name="Coder",
-        agent2_name="Reviewer",
-        approval_state_key="review_decision",
-        approval_keyword="APPROVE",
-    )
-
-    # Create TrackingLoopAgent for iterative refinement with token tracking
-    review_loop = TrackingLoopAgent(
-        name="CodeReviewLoop",
-        description="Iteratively refines code through Coder-Reviewer collaboration",
         max_iterations=max_iterations,
-        sub_agents=[coder, reviewer, approval_checker],
     )
 
     # Session setup
@@ -480,44 +383,3 @@ FEEDBACK: [what the test showed]""",
         iterations=iterations,
         test_passed=success,
     )
-
-
-def _generate_budget_message(
-    awareness_condition: MultiAgentAwarenessCondition,
-    max_iterations: int,
-    agent_role: str = "",
-) -> str:
-    """Generate budget awareness message for agents.
-
-    Args:
-        awareness_condition: Budget awareness level
-        max_iterations: Maximum iterations
-        agent_role: Agent role ("Coder" or "Reviewer")
-
-    Returns:
-        str: Budget message (empty for NO_AWARENESS)
-    """
-    if awareness_condition == MultiAgentAwarenessCondition.NO_AWARENESS:
-        return ""
-
-    # Budget allocation (total 5200 tokens)
-    team_total = 5200
-    coder_budget = 1200  # ~23%
-    reviewer_budget = 4000  # ~77% (needs more for function calls)
-
-    if awareness_condition == MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL:
-        # Role-specific message with individual and team awareness
-        agent_budget = coder_budget if agent_role == "Coder" else reviewer_budget
-        return f"""[BUDGET AWARENESS]
-Your team has a total budget of {team_total} tokens for this task.
-Your individual allocation: {agent_budget} tokens
-Maximum {max_iterations} iterations available.
-Use tokens wisely - be concise and focused.
-"""
-
-    # Fallback for other conditions (not used in clean 2x2 design)
-    return f"""[BUDGET AWARENESS]
-You are working in a team with a limited token budget.
-Maximum {max_iterations} iterations available.
-Use tokens wisely - be concise and focused.
-"""

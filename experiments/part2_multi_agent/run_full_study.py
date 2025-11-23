@@ -33,7 +33,7 @@ from google.genai import types
 from agent_budget.agent_factory import AgentFactory
 from agent_budget.core import IterativeTeamConfig, MultiAgentAwarenessCondition
 from agent_budget.monitor import MultiAgentMetrics, UsageMonitor
-from experiments.evaluator_hotpotqa import HotpotQAEvaluator, HotpotQAScore
+from experiments.shared.evaluator_hotpotqa import HotpotQAEvaluator, HotpotQAScore
 from experiments.tasks.hotpotqa_tasks import HotpotQATask, get_supporting_facts_sample
 
 
