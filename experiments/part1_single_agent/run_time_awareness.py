@@ -1,45 +1,45 @@
-"""Part 1: Budget Awareness Experiment (Within-Subjects Design).
+"""Part 1: Time Awareness Experiment (Within-Subjects Design).
 
-Tests whether explicit budget awareness improves agent performance
+Tests whether explicit time awareness improves agent performance
 using a within-subjects design where SAME questions are tested in both conditions.
 
 Design:
-- Sample 50 questions (stratified by category)
-- Budget level: Between-subjects (tight/moderate/comfortable)
-- Awareness: Within-subjects (unaware vs aware)
-- Each question tested TWICE (once unaware, once aware)
-- Total: 50 questions × 2 conditions = 100 data points
+- Sample 75 questions (stratified by category)
+- Time level: Between-subjects (tight/moderate/comfortable)
+- Awareness: Within-subjects (unaware vs time-aware)
+- Each question tested TWICE (once unaware, once time-aware)
+- Total: 75 questions × 2 conditions = 150 data points
 
-Advantages over between-subjects:
-- Eliminates question difficulty confounding
-- Perfect category balance (same questions in both conditions)
-- Higher statistical power (paired analysis)
-- Can test category × awareness interactions cleanly
+Key Question:
+Does time awareness work better than budget awareness for strategic behavior?
 
 Usage:
-    python -m experiments.part1_single_agent.run_within_subjects
+    python -m experiments.part1_single_agent.run_time_awareness
 """
 
 import asyncio
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from google.adk.agents import Agent
+from google.adk.planners import BuiltInPlanner
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.adk.tools import google_search
 from google.genai import types
 
 from agent_budget.awareness import (
-    BUDGET_COMFORTABLE,
-    BUDGET_MODERATE,
-    BUDGET_TIGHT,
+    TIME_COMFORTABLE,
+    TIME_MODERATE,
+    TIME_TIGHT,
     AwarenessCondition,
-    create_planner_config,
+    TimeConstraint,
+    create_time_aware_instruction,
+    create_unaware_instruction,
 )
 from agent_budget.core import TokenBudget
 from agent_budget.monitor import AgentMetrics, UsageMonitor
@@ -48,14 +48,15 @@ from experiments.tasks.truthful_qa_tasks import TruthfulQATask
 
 
 @dataclass
-class Part1WithinSubjectsResult:
-    """Results from a single Part 1 within-subjects trial.
+class TimeAwarenessResult:
+    """Results from a single time awareness trial.
 
     Attributes:
         question_id: Unique identifier for this question (same for both conditions)
         task_id: TruthfulQA task identifier
         condition: Awareness condition (aware/unaware)
-        budget_level: Budget level (tight/moderate/comfortable)
+        time_level: Time constraint level (tight/moderate/comfortable)
+        time_limit_seconds: Time constraint in seconds
         category: Question category from TruthfulQA
         question: The question asked
         response: Agent's response
@@ -68,10 +69,11 @@ class Part1WithinSubjectsResult:
         error: Error message if failed
     """
 
-    question_id: str  # NEW: Links paired observations
+    question_id: str
     task_id: str
     condition: str
-    budget_level: str
+    time_level: str
+    time_limit_seconds: int
     category: str
     question: str
     response: str
@@ -89,7 +91,8 @@ class Part1WithinSubjectsResult:
             "question_id": self.question_id,
             "task_id": self.task_id,
             "condition": self.condition,
-            "budget_level": self.budget_level,
+            "time_level": self.time_level,
+            "time_limit_seconds": self.time_limit_seconds,
             "category": self.category,
             "question": self.question,
             "response": self.response,
@@ -104,29 +107,33 @@ class Part1WithinSubjectsResult:
 
 
 @dataclass
-class Part1WithinSubjectsSuite:
-    """Collection of Part 1 within-subjects results.
+class TimeAwarenessSuite:
+    """Collection of time awareness results.
 
     Attributes:
-        results: List of individual results (2 per question: unaware + aware)
+        results: List of individual results (2 per question: unaware + time-aware)
         started_at: Suite start timestamp
         completed_at: Suite completion timestamp
     """
 
-    results: list[Part1WithinSubjectsResult] = field(default_factory=list)
+    results: list[TimeAwarenessResult] = None
     started_at: str | None = None
     completed_at: str | None = None
 
+    def __post_init__(self):
+        if self.results is None:
+            self.results = []
+
     def get_pairs(
         self,
-    ) -> list[tuple[Part1WithinSubjectsResult, Part1WithinSubjectsResult]]:
-        """Get paired results (unaware, aware) for each question.
+    ) -> list[tuple[TimeAwarenessResult, TimeAwarenessResult]]:
+        """Get paired results (unaware, time-aware) for each question.
 
         Returns:
-            List of (unaware_result, aware_result) tuples
+            List of (unaware_result, time_aware_result) tuples
         """
         # Group by question_id
-        by_question: dict[str, list[Part1WithinSubjectsResult]] = {}
+        by_question: dict[str, list[TimeAwarenessResult]] = {}
         for r in self.results:
             if r.success:
                 if r.question_id not in by_question:
@@ -148,6 +155,7 @@ class Part1WithinSubjectsSuite:
         return {
             "metadata": {
                 "design": "within-subjects",
+                "resource_type": "time",
                 "total_questions": len(set(r.question_id for r in self.results)),
                 "total_observations": len(self.results),
                 "successful": len([r for r in self.results if r.success]),
@@ -158,8 +166,8 @@ class Part1WithinSubjectsSuite:
         }
 
 
-class Part1WithinSubjectsRunner:
-    """Runner for Part 1 within-subjects budget awareness experiments."""
+class TimeAwarenessRunner:
+    """Runner for time awareness experiments."""
 
     def __init__(self) -> None:
         """Initialize runner."""
@@ -172,29 +180,44 @@ class Part1WithinSubjectsRunner:
         question_id: str,
         task: TruthfulQATask,
         condition: AwarenessCondition,
-        budget_config: TokenBudget,
-        budget_level: str,
-    ) -> Part1WithinSubjectsResult:
+        time_constraint: TimeConstraint,
+        time_level: str,
+    ) -> TimeAwarenessResult:
         """Run a single trial for one condition.
 
         Args:
             question_id: Unique identifier for this question
             task: TruthfulQA task to run
             condition: Awareness condition to test
-            budget_config: Token budget configuration
-            budget_level: Budget level name (tight/moderate/comfortable)
+            time_constraint: Time constraint configuration
+            time_level: Time level name (tight/moderate/comfortable)
 
         Returns:
-            Part1WithinSubjectsResult with response and evaluation
+            TimeAwarenessResult with response and evaluation
         """
         try:
-            # Create agent config with awareness condition
-            # Use mechanistic version (positive framing + budget consumption explanation)
-            instruction, planner, generate_config = create_planner_config(
-                condition=condition, budget_config=budget_config, use_mechanistic=True
+            # Create instruction based on condition
+            if condition == AwarenessCondition.AWARE:
+                instruction = create_time_aware_instruction(time_constraint)
+            else:
+                instruction = create_unaware_instruction()
+
+            # Create agent with standard budget (no token constraints for time test)
+            # Use comfortable budget to avoid token limits confounding time test
+            budget = TokenBudget(reasoning_tokens=2048, output_tokens=512)
+
+            planner = BuiltInPlanner(
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=budget.reasoning_tokens,
+                    include_thoughts=True,
+                )
             )
 
-            # Create agent
+            generate_config = types.GenerateContentConfig(
+                max_output_tokens=budget.total,
+                temperature=0.2,
+            )
+
             agent = Agent(
                 model="gemini-2.5-flash-lite",
                 name=f"{condition.value}_agent",
@@ -207,11 +230,11 @@ class Part1WithinSubjectsRunner:
             # Create runner
             runner = Runner(
                 agent=agent,
-                app_name="part1_within_subjects",
+                app_name="time_awareness",
                 session_service=self.session_service,
             )
             session = await runner.session_service.create_session(
-                app_name="part1_within_subjects", user_id="researcher"
+                app_name="time_awareness", user_id="researcher"
             )
 
             # Run task
@@ -251,11 +274,12 @@ class Part1WithinSubjectsRunner:
             # Evaluate correctness
             eval_result = self.evaluator.evaluate_correctness(task, response)
 
-            return Part1WithinSubjectsResult(
+            return TimeAwarenessResult(
                 question_id=question_id,
                 task_id=task.id,
                 condition=condition.value,
-                budget_level=budget_level,
+                time_level=time_level,
+                time_limit_seconds=time_constraint.seconds,
                 category=task.category,
                 question=task.question,
                 response=response,
@@ -268,11 +292,12 @@ class Part1WithinSubjectsRunner:
             )
 
         except Exception as e:
-            return Part1WithinSubjectsResult(
+            return TimeAwarenessResult(
                 question_id=question_id,
                 task_id=task.id,
                 condition=condition.value,
-                budget_level=budget_level,
+                time_level=time_level,
+                time_limit_seconds=time_constraint.seconds,
                 category=task.category,
                 question=task.question,
                 response="",
@@ -291,23 +316,23 @@ class Part1WithinSubjectsRunner:
                 error=str(e),
             )
 
-    async def run_within_subjects_study(
-        self, n_questions: int = 50, seed: int = 42
-    ) -> Part1WithinSubjectsSuite:
-        """Run full Part 1 study with within-subjects design.
+    async def run_time_awareness_study(
+        self, n_questions: int = 75, seed: int = 900
+    ) -> TimeAwarenessSuite:
+        """Run full time awareness study with within-subjects design.
 
         Args:
-            n_questions: Number of questions to test (default 50)
+            n_questions: Number of questions to test (default 75)
             seed: Random seed for sampling
 
         Returns:
-            Part1WithinSubjectsSuite with all results
+            TimeAwarenessSuite with all results
         """
         import random
 
         random.seed(seed)
 
-        suite = Part1WithinSubjectsSuite()
+        suite = TimeAwarenessSuite()
         suite.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Load questions
@@ -316,27 +341,27 @@ class Part1WithinSubjectsRunner:
         loader = TruthfulQALoader()
         tasks = loader.sample_stratified(n=n_questions, seed=seed)
 
-        # Assign budget levels (between-subjects)
-        budget_configs = [
-            ("tight", BUDGET_TIGHT),
-            ("moderate", BUDGET_MODERATE),
-            ("comfortable", BUDGET_COMFORTABLE),
+        # Assign time levels (between-subjects)
+        time_configs = [
+            ("tight", TIME_TIGHT),
+            ("moderate", TIME_MODERATE),
+            ("comfortable", TIME_COMFORTABLE),
         ]
 
-        # Distribute questions across budget levels
-        questions_per_budget = n_questions // len(budget_configs)
-        remainder = n_questions % len(budget_configs)
+        # Distribute questions across time levels
+        questions_per_level = n_questions // len(time_configs)
+        remainder = n_questions % len(time_configs)
 
         task_idx = 0
         question_assignments = []
 
-        for i, (budget_level, budget_config) in enumerate(budget_configs):
-            n_for_budget = questions_per_budget + (1 if i < remainder else 0)
-            assigned_tasks = tasks[task_idx : task_idx + n_for_budget]
-            task_idx += n_for_budget
+        for i, (time_level, time_constraint) in enumerate(time_configs):
+            n_for_level = questions_per_level + (1 if i < remainder else 0)
+            assigned_tasks = tasks[task_idx : task_idx + n_for_level]
+            task_idx += n_for_level
 
             for task in assigned_tasks:
-                question_assignments.append((task, budget_level, budget_config))
+                question_assignments.append((task, time_level, time_constraint))
 
         print(f"Total questions: {len(question_assignments)}")
         print(
@@ -346,7 +371,7 @@ class Part1WithinSubjectsRunner:
 
         # Run experiments: Each question tested in BOTH conditions
         trial_num = 0
-        for question_idx, (task, budget_level, budget_config) in enumerate(
+        for question_idx, (task, time_level, time_constraint) in enumerate(
             question_assignments, 1
         ):
             question_id = f"q{question_idx:03d}"
@@ -354,7 +379,7 @@ class Part1WithinSubjectsRunner:
             print(f"\n{'=' * 80}")
             print(
                 f"Question {question_idx}/{len(question_assignments)}: {task.id} | "
-                f"{budget_level} ({budget_config.total} tokens)"
+                f"{time_level} ({time_constraint.display})"
             )
             print(f"Category: {task.category}")
             print(f"Question: {task.question[:80]}...")
@@ -367,36 +392,36 @@ class Part1WithinSubjectsRunner:
                 question_id=question_id,
                 task=task,
                 condition=AwarenessCondition.UNAWARE,
-                budget_config=budget_config,
-                budget_level=budget_level,
+                time_constraint=time_constraint,
+                time_level=time_level,
             )
             suite.results.append(result_unaware)
 
             if result_unaware.success:
                 print(
                     f"  ✓ {result_unaware.metrics.duration_seconds:.1f}s | "
-                    f"{result_unaware.metrics.total_tokens_used}/{budget_config.total} tokens | "
+                    f"{result_unaware.metrics.total_tool_calls} searches | "
                     f"score={result_unaware.correctness:.2f}"
                 )
             else:
                 print(f"  ✗ Failed: {result_unaware.error}")
 
-            # Test with AWARE agent
+            # Test with TIME-AWARE agent
             trial_num += 1
-            print(f"[Trial {trial_num}/150] AWARE agent...")
+            print(f"[Trial {trial_num}/150] TIME-AWARE agent...")
             result_aware = await self.run_single_trial(
                 question_id=question_id,
                 task=task,
                 condition=AwarenessCondition.AWARE,
-                budget_config=budget_config,
-                budget_level=budget_level,
+                time_constraint=time_constraint,
+                time_level=time_level,
             )
             suite.results.append(result_aware)
 
             if result_aware.success:
                 print(
                     f"  ✓ {result_aware.metrics.duration_seconds:.1f}s | "
-                    f"{result_aware.metrics.total_tokens_used}/{budget_config.total} tokens | "
+                    f"{result_aware.metrics.total_tool_calls} searches | "
                     f"score={result_aware.correctness:.2f}"
                 )
             else:
@@ -405,13 +430,17 @@ class Part1WithinSubjectsRunner:
             # Show paired comparison
             if result_unaware.success and result_aware.success:
                 acc_diff = result_unaware.correctness - result_aware.correctness
-                token_diff = (
-                    result_aware.metrics.total_tokens_used
-                    - result_unaware.metrics.total_tokens_used
+                time_diff = (
+                    result_aware.metrics.duration_seconds
+                    - result_unaware.metrics.duration_seconds
+                )
+                search_diff = (
+                    result_aware.metrics.total_tool_calls
+                    - result_unaware.metrics.total_tool_calls
                 )
                 print(
                     f"  → Accuracy diff (unaware - aware): {acc_diff:+.2f} | "
-                    f"Token diff: {token_diff:+d}"
+                    f"Time diff: {time_diff:+.1f}s | Search diff: {search_diff:+d}"
                 )
 
         suite.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -419,34 +448,39 @@ class Part1WithinSubjectsRunner:
 
 
 async def main() -> None:
-    """Run Part 1 mechanistic explanation test (budget consumption mechanism)."""
+    """Run time awareness experiment."""
     print("=" * 80)
-    print("PART 1: Budget Awareness Study - MECHANISTIC EXPLANATION TEST")
+    print("PART 1: TIME AWARENESS EXPERIMENT")
     print("=" * 80)
     print()
-    print("Testing: Does explaining HOW budget works improve effectiveness?")
+    print("Testing: Does time awareness improve strategic resource allocation?")
     print()
     print("Design:")
     print("  - 75 questions (stratified by category)")
-    print("  - Budget level: Between-subjects (tight/moderate/comfortable)")
+    print("  - Time level: Between-subjects (tight/moderate/comfortable)")
     print("  - Awareness: Within-subjects (each question tested in BOTH conditions)")
-    print("  - Aware condition: Positive framing + mechanistic explanation")
+    print("  - Time-aware condition: Mechanistic explanation of time consumption")
     print("  - Total: 75 questions × 2 conditions = 150 data points")
     print()
-    print("Mechanistic explanation features:")
-    print("  - Explains that thinking/tools/output consume tokens")
-    print("  - Provides concrete example (100 words = ~130 tokens)")
-    print("  - Helps agent understand operational impact of actions")
-    print("  - Builds on positive framing (reframed version)")
+    print("Time levels:")
+    print("  - Tight: 30 seconds (forces efficiency)")
+    print("  - Moderate: 60 seconds (comfortable)")
+    print("  - Comfortable: 90 seconds (generous)")
+    print()
+    print("Hypothesis:")
+    print("  Time awareness may work better than budget awareness because:")
+    print("  - More concrete and actionable (seconds vs tokens)")
+    print("  - Creates urgency (not just scarcity)")
+    print("  - Clearer trade-offs for search decisions")
     print()
     print("Power: Can detect effect size d ≥ 0.45 with 80% power")
     print()
     print("=" * 80)
     print()
 
-    # Run study with mechanistic version
-    runner = Part1WithinSubjectsRunner()
-    suite = await runner.run_within_subjects_study(n_questions=75, seed=800)
+    # Run study
+    runner = TimeAwarenessRunner()
+    suite = await runner.run_time_awareness_study(n_questions=75, seed=900)
 
     # Print summary
     print()
@@ -464,15 +498,18 @@ async def main() -> None:
     # Paired analysis
     if pairs:
         accuracy_diffs = []
-        token_diffs = []
+        time_diffs = []
+        search_diffs = []
 
         for unaware, aware in pairs:
             acc_diff = unaware.correctness - aware.correctness
-            token_diff = (
-                aware.metrics.total_tokens_used - unaware.metrics.total_tokens_used
+            time_diff = (
+                aware.metrics.duration_seconds - unaware.metrics.duration_seconds
             )
+            search_diff = aware.metrics.total_tool_calls - unaware.metrics.total_tool_calls
             accuracy_diffs.append(acc_diff)
-            token_diffs.append(token_diff)
+            time_diffs.append(time_diff)
+            search_diffs.append(search_diff)
 
         import numpy as np
 
@@ -480,7 +517,10 @@ async def main() -> None:
         print(
             f"  Accuracy: {np.mean(accuracy_diffs):+.3f} ± {np.std(accuracy_diffs):.3f}"
         )
-        print(f"  Tokens:   {np.mean(token_diffs):+.1f} ± {np.std(token_diffs):.1f}")
+        print(f"  Time:     {np.mean(time_diffs):+.1f}s ± {np.std(time_diffs):.1f}s")
+        print(
+            f"  Searches: {np.mean(search_diffs):+.1f} ± {np.std(search_diffs):.1f}"
+        )
         print()
 
         # Count wins
@@ -494,12 +534,23 @@ async def main() -> None:
         print(f"  Ties:         {ties}")
         print()
 
+        # Search behavior
+        fewer_searches = sum(1 for d in search_diffs if d < 0)
+        more_searches = sum(1 for d in search_diffs if d > 0)
+        same_searches = sum(1 for d in search_diffs if d == 0)
+
+        print("Search Behavior (Time-aware vs Unaware):")
+        print(f"  Fewer searches: {fewer_searches} ({100*fewer_searches/len(pairs):.1f}%)")
+        print(f"  More searches:  {more_searches} ({100*more_searches/len(pairs):.1f}%)")
+        print(f"  Same searches:  {same_searches} ({100*same_searches/len(pairs):.1f}%)")
+        print()
+
     # Save results
     output_dir = Path("experiments/results")
     output_dir.mkdir(exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    json_path = output_dir / f"part1_within_subjects_{timestamp}.json"
+    json_path = output_dir / f"part1_time_awareness_{timestamp}.json"
 
     with open(json_path, "w") as f:
         json.dump(suite.to_dict(), f, indent=2)

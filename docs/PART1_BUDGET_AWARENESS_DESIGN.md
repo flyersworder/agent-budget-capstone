@@ -274,40 +274,74 @@ def bootstrap_paired_ci(pairs, n_bootstrap=10000):
 
 ## Actual Outcomes
 
-### ✅ **RESULT: Budget Awareness HELPS Performance**
+### ❌ **RESULT: Budget Awareness Does NOT Work**
 
-**Statistical Evidence (Seeds 100 & 200 completed):**
+**Phase 1: Between-Subjects Design (FLAWED)**
+- Confounded by question difficulty
+- Results not replicable
+- Switched to within-subjects design
 
-| Metric | Seed=100 | Seed=200 | Pooled (n=99) |
-|--------|----------|----------|---------------|
-| Sample size | 50 pairs | 49 pairs | 99 pairs |
-| Unaware accuracy | 65.0% | 76.5% | 70.7% |
-| Aware accuracy | 73.0% | 81.6% | 77.3% |
-| **Difference (A - U)** | **+8.0pp** | **+5.1pp** | **+6.6pp** |
-| p-value (paired t) | 0.031* | 0.058† | **0.004** |
-| Cohen's d | -0.314 | -0.278 | -0.296 |
-| Effect size | Small | Small | Small |
+**Phase 2: Within-Subjects Design - Multiple Prompt Variations (ALL FAILED)**
 
-**Replication Criteria - All Met:**
-1. ✅ Direction consistent (aware > unaware in both seeds)
-2. ✅ Effect size similar (d ≈ -0.3)
-3. ✅ Statistical evidence (p < 0.1 individually, p < 0.01 pooled)
-4. ✅ Behavioral consistency (aware uses +80-120 reasoning tokens)
+All tests used within-subjects design (same questions in both conditions):
 
-**Key Behavioral Patterns:**
-- **Token allocation:** Aware agents invest more in thinking (+79-122 tokens)
-- **Output efficiency:** Aware agents produce similar-length outputs
-- **Selective benefit:** Effect concentrated in ~10% of questions where awareness provides substantial advantage
-- **No downside:** Zero cases where awareness hurts performance
+| Test Variant | n pairs | Unaware Acc | Aware Acc | Difference | p-value | Result |
+|--------------|---------|-------------|-----------|------------|---------|--------|
+| **High-power baseline** | **100** | **74.5%** | **74.0%** | **-0.5pp** | **0.889** | **FAIL** |
+| **Positive reframing** | 50 | 71.0% | 67.0% | -4.0pp | 0.317 | **FAIL** |
+| **Strongest language** | 30 | 63.3% | 61.7% | -1.7pp | 0.767 | **FAIL** |
+| **Mechanistic explanation** | 75 | 73.3% | 70.7% | -2.7pp | 0.372 | **FAIL** |
+
+**Key Finding:**
+1. ❌ NO prompt variation showed significant improvement
+2. ❌ Largest sample (n=100) showed near-zero effect (-0.5pp, p=0.889)
+3. ❌ All differences are negative or near zero
+4. ❌ No statistical significance at any sample size
+
+### 🚨 **ADDITIONAL FINDING: Time Awareness Also Fails**
+
+**Time Awareness Test (n=75):**
+
+Tested if TIME constraints (seconds) work better than TOKEN constraints:
+
+| Metric | Result | Interpretation |
+|--------|--------|----------------|
+| Accuracy improvement | +0.027 (p=0.496) | **NOT SIGNIFICANT** |
+| Reasoning tokens | +114 tokens | Higher cognitive cost |
+| Strategic searches | 21% use fewer (vs 9% for budget) | Modest improvement but still weak |
+| Unchanged behavior | 72% | Majority show NO adaptation |
+
+**Verdict:** Time awareness shows 2x improvement in strategic behavior (21% vs 9%) but:
+- ❌ NO accuracy benefit (p=0.496)
+- ❌ 72% still show no behavioral change
+- ❌ Higher cognitive cost (+114 vs ~+42 tokens for budget)
+- ❌ Not practically useful
+
+### 🔍 **Why Budget Awareness Fails**
+
+**What We Know:**
+- ❌ Budget awareness does NOT improve accuracy (tested with n=30, 50, 75, 100)
+- ❌ All prompt variations FAIL (positive framing, strongest language, mechanistic)
+- ❌ Time awareness FAILS (no accuracy benefit despite modest strategic behavior)
+- ❌ Agents DON'T use resources strategically (72-81% show NO behavioral change)
+
+**Root Cause Analysis:**
+1. **Not a prompt wording problem** - Tested 4 different framings, all failed
+2. **Not a sample size problem** - Even n=100 showed null result
+3. **Not a framing problem** - Time vs tokens makes no difference
+4. **Fundamental capability limitation** - Agents cannot operationalize conceptual understanding into strategic resource allocation decisions
+
+**Evidence:**
+- 72-81% of agents use SAME number of Google searches regardless of awareness
+- No improvement in accuracy per search (not more efficient)
+- Mechanistic teaching doesn't help (d=0.103, p=0.372)
+- Time framing only affects 21% of agents (vs 9% for budget) but NO accuracy gain
 
 **Implications:**
-- ✅ Agents benefit from explicit resource constraints
-- ✅ Metacognitive awareness enables strategic resource allocation
-- ✅ Current LLM deployment practices miss optimization opportunity
-- ✅ Prompt engineering should include budget information for constrained scenarios
-
-**Mechanism:**
-Budget awareness → deeper strategic thinking → better fact verification → higher accuracy on challenging questions
+- ❌ Budget information in prompts does NOT help
+- ❌ Prompt engineering cannot solve this problem
+- ❌ Agents fundamentally cannot operationalize constraints strategically
+- 🔬 Different approach needed (training, architecture, different task design)
 
 ## Success Criteria ✅ ALL MET
 
