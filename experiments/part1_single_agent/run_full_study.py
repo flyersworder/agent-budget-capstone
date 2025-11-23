@@ -43,11 +43,13 @@ from experiments.tasks.truthful_qa_tasks import TruthfulQATask
 
 @dataclass
 class Part1Result:
-    """Results from a single Part 2 experiment.
+    """Results from a single Part 1 experiment.
 
     Attributes:
         task_id: TruthfulQA task identifier
         condition: Awareness condition (aware/unaware)
+        budget_level: Budget level (tight/moderate/comfortable)
+        category: Question category from TruthfulQA (e.g., Health, Law, Misconceptions)
         question: The question asked
         response: Agent's response
         correct_answer: Ground truth answer
@@ -61,6 +63,7 @@ class Part1Result:
     task_id: str
     condition: str
     budget_level: str  # tight, moderate, or comfortable
+    category: str  # TruthfulQA category (e.g., Health, Law, Misconceptions)
     question: str
     response: str
     thinking_text: str  # Thinking tokens (internal reasoning)
@@ -77,6 +80,7 @@ class Part1Result:
             "task_id": self.task_id,
             "condition": self.condition,
             "budget_level": self.budget_level,
+            "category": self.category,
             "question": self.question,
             "response": self.response,
             "thinking_text": self.thinking_text,
@@ -91,7 +95,7 @@ class Part1Result:
 
 @dataclass
 class Part1Suite:
-    """Collection of Part 2 experiment results.
+    """Collection of Part 1 experiment results.
 
     Attributes:
         results: List of individual results
@@ -143,7 +147,7 @@ class Part1Suite:
 
 
 class Part1Runner:
-    """Runner for Part 2 budget awareness experiments."""
+    """Runner for Part 1 budget awareness experiments."""
 
     def __init__(self) -> None:
         """Initialize runner."""
@@ -240,6 +244,7 @@ class Part1Runner:
                 task_id=task.id,
                 condition=condition.value,
                 budget_level=budget_level,
+                category=task.category,
                 question=task.question,
                 response=response,
                 thinking_text=thinking_text,
@@ -255,6 +260,7 @@ class Part1Runner:
                 task_id=task.id,
                 condition=condition.value,
                 budget_level=budget_level,
+                category=task.category,
                 question=task.question,
                 response="",
                 thinking_text="",
@@ -275,7 +281,7 @@ class Part1Runner:
     async def run_full_study(
         self, n_questions: int = 100, seed: int = 42
     ) -> Part1Suite:
-        """Run full Part 2 study with between-subjects design.
+        """Run full Part 1 study with between-subjects design.
 
         Args:
             n_questions: Number of questions to test (default 100)
@@ -315,16 +321,16 @@ class Part1Runner:
         # Randomly assign questions to conditions (between-subjects)
         random.shuffle(tasks)
         questions_per_condition = len(tasks) // len(conditions)
+        remainder = len(tasks) % len(conditions)
 
+        # Distribute remainder evenly across first few conditions
         assignments = []
+        task_idx = 0
         for i, (budget_level, budget_config, awareness) in enumerate(conditions):
-            start_idx = i * questions_per_condition
-            end_idx = (
-                start_idx + questions_per_condition
-                if i < len(conditions) - 1
-                else len(tasks)
-            )
-            assigned_tasks = tasks[start_idx:end_idx]
+            # Give one extra question to first 'remainder' conditions
+            n_questions = questions_per_condition + (1 if i < remainder else 0)
+            assigned_tasks = tasks[task_idx : task_idx + n_questions]
+            task_idx += n_questions
 
             for task in assigned_tasks:
                 assignments.append((task, budget_level, budget_config, awareness))
@@ -360,7 +366,7 @@ class Part1Runner:
 
 
 async def main() -> None:
-    """Run full Part 2 study."""
+    """Run full Part 1 study."""
     print("=" * 80)
     print("PART 1: Budget Awareness Study (Full)")
     print("=" * 80)
@@ -376,7 +382,7 @@ async def main() -> None:
 
     # Run full study
     runner = Part1Runner()
-    suite = await runner.run_full_study(n_questions=100, seed=42)
+    suite = await runner.run_full_study(n_questions=100, seed=100)
 
     # Print summary
     print()

@@ -1,4 +1,4 @@
-"""Budget awareness configurations for Part 2 experiments.
+"""Budget awareness configurations for Part 1 experiments.
 
 This module defines the two experimental conditions:
 1. Budget-Unaware (Control): Current approach with no budget information

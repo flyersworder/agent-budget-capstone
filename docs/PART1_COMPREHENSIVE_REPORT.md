@@ -25,7 +25,8 @@
 │   EFFECT:               -12.9% accuracy  | +137 reasoning tokens          │
 │                                                                            │
 │   Statistical Significance:   p = 0.028 * (SIGNIFICANT!)                  │
-│   Effect Size:                d = 0.313 (small-to-medium)                 │
+│   Effect Size:                d = 0.313 [95% CI: 0.038, 0.599]            │
+│   Bootstrap CI (difference):  [1.6%, 24.1%] (EXCLUDES ZERO!)              │
 │   Non-parametric Test:        p = 0.011 * (Mann-Whitney U)                │
 │                                                                            │
 └────────────────────────────────────────────────────────────────────────────┘
@@ -87,16 +88,18 @@ This paradoxical finding challenges the common assumption that informing agents 
 
 **Independent Samples T-Test**:
 ```
-Condition      Mean Accuracy   SD      N
-────────────────────────────────────────
-Unaware        80.2%          0.398   96
-Aware          67.3%          0.471   104
-────────────────────────────────────────
-Difference     12.9pp
+Condition      Mean Accuracy   95% Bootstrap CI      SD      N
+────────────────────────────────────────────────────────────────
+Unaware        80.2%          [72.4%, 87.5%]        0.398   96
+Aware          67.3%          [58.7%, 75.5%]        0.471   104
+────────────────────────────────────────────────────────────────
+Difference     12.9pp         [1.6%, 24.1%] ✓
 t-statistic    2.212
 p-value        0.028 *
-Cohen's d      0.313 (small-to-medium)
+Cohen's d      0.313          [0.038, 0.599]
 ```
+
+✓ = Bootstrap CI excludes zero (robust evidence of real effect)
 
 **Mann-Whitney U Test** (non-parametric):
 ```
@@ -151,27 +154,29 @@ Pattern: Stronger negative effect under tighter constraints
 
 ### 2.4 Bootstrap Confidence Intervals
 
-**Main Effect (1000 bootstrap samples)**:
+**Main Effect (10,000 bootstrap samples)**:
 ```
 Condition      Mean      95% CI
 ────────────────────────────────────
-Unaware        80.2%     [72.9%, 86.5%]
-Aware          67.3%     [60.4%, 74.2%]
+Unaware        80.2%     [72.4%, 87.5%]
+Aware          67.3%     [58.7%, 75.5%]
 ────────────────────────────────────
-Difference     -12.9%    [-22.1%, -3.7%]
+Difference     12.9%     [1.6%, 24.1%]
 ```
 
-**By Budget Level**:
-```
-Tight / Unaware:        78.1%  [65.6%, 90.6%]
-Tight / Aware:          62.5%  [43.8%, 81.2%]
+**Key Finding**: The 95% bootstrap CI for the difference **excludes zero**, providing robust evidence that the effect is real. We can be 95% confident the true effect lies between 1.6% and 24.1% accuracy reduction.
 
-Moderate / Unaware:     84.4%  [71.9%, 96.9%]
-Moderate / Aware:       70.3%  [57.8%, 82.8%]
-
-Comfortable / Unaware:  78.1%  [65.6%, 90.6%]
-Comfortable / Aware:    68.8%  [56.2%, 81.2%]
+**Effect Size with Bootstrap CI**:
 ```
+Cohen's d:      0.313     [0.038, 0.599]
+Interpretation: Small effect (lower bound barely positive)
+```
+
+**Interpretation**:
+- The bootstrap analysis strengthens the parametric test results (p=0.028)
+- CI excluding zero is more robust than p-value alone (no distributional assumptions)
+- Effect size CI is wide but consistently positive, indicating real but variable impact
+- Lower bound near zero (0.038) consistent with marginal statistical significance
 
 ---
 
@@ -401,9 +406,11 @@ Sanger and Stopes, whilst also acknowledging the shift...
 
 **Supporting Evidence**:
 - Aware agents use 36% more tokens but achieve 12.9pp lower accuracy
+- Bootstrap CI [1.6%, 24.1%] excludes zero, confirming robustness
 - Thinking texts show more meta-commentary and structural elaboration
 - Effect strongest under tight constraints (when budget management is hardest)
 - Token overhead doesn't correlate with accuracy improvement
+- Effect replicates across independent runs (d=0.351, d=0.270)
 
 ### 5.2 Alternative Explanations
 
@@ -596,17 +603,20 @@ for part in event.content.parts:
 - `agent_budget/awareness.py` - Budget awareness conditions and instructions
 
 **Experiment Runner**:
-- `experiments/run_part1_full.py` - Main experiment script
+- `experiments/part1_single_agent/run_full_study.py` - Main experiment script
 
 **Analysis**:
-- `experiments/analyze_part1_full.py` - Per-run analysis with bootstrap CIs
-- `experiments/analyze_part1_combined.py` - Pooled analysis of both runs
+- `experiments/part1_single_agent/analyze_combined.py` - Pooled analysis with bootstrap CIs (10,000 samples)
+  - Bootstrap CI for mean accuracy (each condition)
+  - Bootstrap CI for difference in means
+  - Bootstrap CI for Cohen's d effect size
+  - All CIs computed via percentile method with seed=42 for reproducibility
 
 **Tasks**:
 - `experiments/tasks/truthful_qa_tasks.py` - TruthfulQA dataset interface
 
 **Evaluation**:
-- `experiments/evaluator_objective.py` - LLM-as-judge implementation
+- `experiments/shared/evaluator_truthfulqa.py` - LLM-as-judge implementation
 
 ---
 
@@ -614,8 +624,8 @@ for part in event.content.parts:
 
 This study provides **first empirical evidence** that explicit budget awareness can negatively impact LLM agent performance on factual question-answering tasks. The effect is:
 
-- ✓ **Statistically significant** (p = 0.028, two-tailed t-test)
-- ✓ **Robust** (replicates across 2 independent runs)
+- ✓ **Statistically significant** (p = 0.028, two-tailed t-test; p = 0.011, Mann-Whitney U)
+- ✓ **Robust** (95% bootstrap CI [1.6%, 24.1%] excludes zero; replicates across 2 runs)
 - ✓ **Substantial** (-12.9pp accuracy, +36% token usage)
 - ✓ **Paradoxical** (more resources → worse outcomes)
 - ✓ **Theoretically important** (challenges common assumptions)
@@ -761,8 +771,9 @@ Total    96         104        200
 
 ---
 
-**Document Version**: 1.0
-**Last Updated**: November 19, 2025
+**Document Version**: 1.1
+**Last Updated**: November 23, 2025
+**Updates**: Added bootstrap confidence intervals (10,000 samples) for all main effects
 **Contact**: Research Team
 
 ---

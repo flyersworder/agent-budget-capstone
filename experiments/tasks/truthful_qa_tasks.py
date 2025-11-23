@@ -1,4 +1,4 @@
-"""TruthfulQA dataset loader and task definitions for Part 2 experiments.
+"""TruthfulQA dataset loader and task definitions for Part 1 experiments.
 
 This module provides utilities for loading, sampling, and working with the
 TruthfulQA dataset for budget awareness experiments.
