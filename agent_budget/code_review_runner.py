@@ -49,14 +49,16 @@ class CodeReviewTrial:
     num_iterations: int
     final_decision: str  # APPROVE or MAX_ITERATIONS_REACHED
 
-    # Token usage (approximate)
+    # Token usage (tracked from LLM responses)
     team_total_tokens: int
+    coder_tokens: int = 0
+    reviewer_tokens: int = 0
 
     # Iteration details
-    iterations: list[dict[str, Any]]
+    iterations: list[dict[str, Any]] | None = None
 
     # Metadata
-    test_passed: bool
+    test_passed: bool = False
 
 
 def execute_python_code(code: str) -> str:
@@ -221,134 +223,39 @@ async def run_code_review_trial(
         ],
     )
 
-    iterations = []
     num_iterations = 0
-    conversation_log = []
-
-    print("\n" + "=" * 80)
-    print("STARTING CODE REVIEW ITERATIONS")
-    print("=" * 80)
+    coder_tokens = 0
+    reviewer_tokens = 0
 
     async for event in runner.run_async(
         user_id="study", session_id=session.id, new_message=initial_message
     ):
-        # Log all events with details
+        # Track iterations and token usage
         if hasattr(event, "author") and event.author:
-            print(f"\n{'─' * 80}")
-            print(f"EVENT FROM: {event.author}")
-
-            # Extract and log content
-            if hasattr(event, "content") and event.content:
-                content_text = ""
-                function_calls = []
-                function_responses = []
-
-                # Extract parts from content
-                if hasattr(event.content, "parts") and event.content.parts:
-                    for part in event.content.parts:
-                        if hasattr(part, "text") and part.text:
-                            content_text += part.text
-                        if hasattr(part, "function_call") and part.function_call:
-                            function_calls.append(part.function_call)
-                        if (
-                            hasattr(part, "function_response")
-                            and part.function_response
-                        ):
-                            function_responses.append(part.function_response)
-
-                if content_text:
-                    print(
-                        f"CONTENT: {content_text[:500]}{'...' if len(content_text) > 500 else ''}"
-                    )
-
-                if function_calls:
-                    print(f"FUNCTION CALLS: {len(function_calls)} call(s)")
-                    for fc in function_calls:
-                        print(f"  - {fc.name}")
-
-                if function_responses:
-                    print(f"FUNCTION RESPONSES: {len(function_responses)} response(s)")
-                    for fr in function_responses:
-                        response_preview = (
-                            str(fr.response)[:300]
-                            if hasattr(fr, "response")
-                            else "(no response)"
-                        )
-                        print(
-                            f"  - {fr.name}: {response_preview}{'...' if len(str(fr.response)) > 300 else ''}"
-                        )
-
-                conversation_log.append(
-                    {
-                        "author": event.author,
-                        "content": content_text,
-                        "function_calls": len(function_calls),
-                    }
-                )
-
-            # Log token usage if available
+            # Track token usage from LLM responses
             if hasattr(event, "usage_metadata") and event.usage_metadata:
                 thinking = getattr(event.usage_metadata, "thoughts_token_count", 0) or 0
-                candidates = (
-                    getattr(event.usage_metadata, "candidates_token_count", 0) or 0
-                )
-                if thinking > 0 or candidates > 0:
-                    print(f"TOKENS: thinking={thinking}, output={candidates}")
+                output = getattr(event.usage_metadata, "candidates_token_count", 0) or 0
+                total = thinking + output
 
-            # Log state changes if available
-            if hasattr(event, "actions") and event.actions:
-                if hasattr(event.actions, "state_delta") and event.actions.state_delta:
-                    print(f"STATE DELTA: {list(event.actions.state_delta.keys())}")
-                    for key, value in event.actions.state_delta.items():
-                        value_preview = str(value)[:100] if value else "(empty)"
-                        print(f"  {key}: {value_preview}")
+                if event.author == "Coder":
+                    coder_tokens += total
+                elif event.author == "Reviewer":
+                    reviewer_tokens += total
 
-            # Track iterations by monitoring Coder responses
+            # Count iterations (each Coder response = 1 iteration)
             if event.author == "Coder":
                 num_iterations += 1
-                print(f"\n🔄 ITERATION {num_iterations} STARTED")
 
-    print("\n" + "=" * 80)
-    print(f"ITERATIONS COMPLETE: {num_iterations} total")
-    print("=" * 80)
-
-    # CRITICAL: Fetch updated session to get committed state changes
-    # The session object is updated in-place during the run, but we need to ensure we have the latest
+    # Fetch final session state
     updated_session = await session_service.get_session(
         app_name="code_review_study",
         user_id="study",
         session_id=session.id,
     )
 
-    # Debug: Show all session state keys
-    print(f"\nALL SESSION STATE KEYS: {list(updated_session.state.keys())}")
-    print("SESSION STATE VALUES:")
-    for key in updated_session.state.keys():
-        value = updated_session.state[key]
-        value_preview = str(value)[:100] if value else "(empty)"
-        print(f"  {key}: {value_preview}")
-
-    # Extract final results from session state
-    final_code = updated_session.state.get("current_code", "")
+    # Extract results
     final_decision_text = updated_session.state.get("review_decision", "")
-
-    print("\n" + "=" * 80)
-    print("FINAL OUTPUTS")
-    print("=" * 80)
-    print(f"\nFINAL CODE ({len(final_code)} chars):")
-    print("─" * 80)
-    print(final_code if final_code else "(no code generated)")
-    print("─" * 80)
-    print("\nFINAL REVIEW DECISION:")
-    print("─" * 80)
-    print(final_decision_text if final_decision_text else "(no decision)")
-    print("─" * 80)
-    print("\nSESSION STATE TOKEN USAGE:")
-    print(f"  Coder total: {updated_session.state.get('Coder_total_tokens', 0)}")
-    print(f"  Reviewer total: {updated_session.state.get('Reviewer_total_tokens', 0)}")
-    print(
-        f"  Team total: {updated_session.state.get('Coder_total_tokens', 0) + updated_session.state.get('Reviewer_total_tokens', 0)}"
-    )
 
     # Determine success
     approved = "APPROVE" in final_decision_text.upper()
@@ -359,14 +266,10 @@ async def run_code_review_trial(
         final_decision = "MAX_ITERATIONS_REACHED"
         success = False
 
-    # Approximate token usage (simple heuristic)
-    team_total_tokens = (
-        len(problem["question_content"].split()) * num_iterations * 2
-        + len(final_code.split()) * 2
-        + len(final_decision_text.split()) * 2
-    )
+    # Use tracked token counts
+    team_total_tokens = coder_tokens + reviewer_tokens
 
-    # Build iteration details (simplified - LoopAgent doesn't expose iteration history easily)
+    # Build iteration details
     iterations = [
         {"iteration": i + 1, "status": "completed"} for i in range(num_iterations)
     ]
@@ -382,4 +285,6 @@ async def run_code_review_trial(
         team_total_tokens=team_total_tokens,
         iterations=iterations,
         test_passed=success,
+        coder_tokens=coder_tokens,
+        reviewer_tokens=reviewer_tokens,
     )

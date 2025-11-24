@@ -285,21 +285,25 @@ class MultiAgentBudgetConfig:
 # PART 2: Code Review Team Configuration
 # ============================================================================
 
-# Standard code review budgets (optimized from testing)
-# Total team budget: 5200 tokens
-# Coder: 60% reasoning, 40% output (needs thinking for code generation)
-# Reviewer: Large budget for function calls and decision output
+# Code review budgets optimized for LiveCodeBench problems
+#
+# Design rationale:
+# - Coder (80%): Needs substantial thinking for algorithm design + code output
+# - Reviewer (20%): Tool execution is FREE (outside LLM), just needs tokens
+#   to call test_code() and interpret the result
+#
+# Total team budget: 2560 tokens
 CODE_REVIEW_CODER_BUDGET = TokenBudget(
-    reasoning_tokens=800,  # Thinking for code design
-    output_tokens=400,  # Code output
-)  # 1200 total (23% of team)
+    reasoning_tokens=1536,  # Thinking for algorithm design
+    output_tokens=512,  # Code output (typically 50-200 lines)
+)  # 2048 total (80% of team)
 
 CODE_REVIEW_REVIEWER_BUDGET = TokenBudget(
-    reasoning_tokens=2600,  # Thinking for review (65% of reviewer budget)
-    output_tokens=1400,  # Function call + decision output (35%)
-)  # 4000 total (77% of team)
+    reasoning_tokens=256,  # Minimal thinking (tool does the work)
+    output_tokens=256,  # Decision output (APPROVE/REVISE + brief feedback)
+)  # 512 total (20% of team)
 
-CODE_REVIEW_TEAM_BUDGET = 5200  # Total budget for Coder + Reviewer
+CODE_REVIEW_TEAM_BUDGET = 2560  # Total budget for Coder + Reviewer
 
 
 # ============================================================================

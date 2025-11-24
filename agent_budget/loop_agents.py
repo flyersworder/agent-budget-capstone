@@ -21,8 +21,10 @@ class CheckApprovalAgent(BaseAgent):  # type: ignore[misc]
     If the feedback contains "APPROVED", it signals the LoopAgent to
     terminate by escalating.
 
-    Also reports cumulative token usage for budget awareness with rich context
-    including budget limits, percentages, and soft warnings.
+    Also reports cumulative token usage for budget awareness with:
+    - Iteration context (e.g., "Iteration 2 of 3 complete")
+    - Actionable guidance (what to focus on next)
+    - Challenge framing (emphasize capability, not threat)
 
     Always checks state['validator_feedback'] for "APPROVED" keyword.
     """
@@ -40,6 +42,7 @@ class CheckApprovalAgent(BaseAgent):  # type: ignore[misc]
         agent2_name: str = "Validator",
         approval_state_key: str = "validator_feedback",
         approval_keyword: str = "APPROVED",
+        max_iterations: int = 3,
     ):
         """Initialize CheckApprovalAgent.
 
@@ -55,6 +58,7 @@ class CheckApprovalAgent(BaseAgent):  # type: ignore[misc]
             agent2_name: Name of second agent (default: "Validator")
             approval_state_key: State key to check for approval (default: "validator_feedback")
             approval_keyword: Keyword indicating approval (default: "APPROVED")
+            max_iterations: Maximum iterations allowed (default: 3)
         """
         super().__init__(name=name, description=description)
         # Store as private attributes to avoid Pydantic field validation
@@ -67,6 +71,8 @@ class CheckApprovalAgent(BaseAgent):  # type: ignore[misc]
         object.__setattr__(self, "_agent2_name", agent2_name)
         object.__setattr__(self, "_approval_state_key", approval_state_key)
         object.__setattr__(self, "_approval_keyword", approval_keyword)
+        object.__setattr__(self, "_max_iterations", max_iterations)
+        object.__setattr__(self, "_current_iteration", 0)
 
     async def _run_async_impl(
         self, ctx: InvocationContext
@@ -79,6 +85,10 @@ class CheckApprovalAgent(BaseAgent):  # type: ignore[misc]
         Yields:
             Event with usage report (if enabled) and escalate flag
         """
+        # Increment iteration counter
+        current_iter = getattr(self, "_current_iteration", 0) + 1
+        object.__setattr__(self, "_current_iteration", current_iter)
+
         # Report token usage if enabled
         usage_message = ""
         if getattr(self, "_report_usage", True):
@@ -94,6 +104,7 @@ class CheckApprovalAgent(BaseAgent):  # type: ignore[misc]
                     r_total=r_total,
                     v_total=v_total,
                     team_total=team_total,
+                    current_iteration=current_iter,
                 )
 
         # Get approval feedback from state using configured key
@@ -128,16 +139,24 @@ class CheckApprovalAgent(BaseAgent):  # type: ignore[misc]
         r_total: int,
         v_total: int,
         team_total: int,
+        current_iteration: int = 1,
     ) -> str:
-        """Generate rich usage message with budget context and warnings.
+        """Generate iteration-aware status message with challenge framing.
+
+        Design principles (from literature review):
+        1. Include iteration context (temporal awareness)
+        2. Frame remaining resources positively (what you CAN do)
+        3. Provide actionable guidance for next iteration
+        4. Avoid threatening language (no emojis, no "WARNING/CRITICAL")
 
         Args:
-            r_total: Researcher cumulative tokens used
-            v_total: Validator cumulative tokens used
+            r_total: Agent1 cumulative tokens used
+            v_total: Agent2 cumulative tokens used
             team_total: Team cumulative tokens used
+            current_iteration: Current iteration number (1-indexed)
 
         Returns:
-            Formatted usage message with context and warnings
+            Formatted status message with iteration context
         """
         awareness = getattr(
             self, "_awareness_condition", MultiAgentAwarenessCondition.NO_AWARENESS
@@ -145,44 +164,53 @@ class CheckApprovalAgent(BaseAgent):  # type: ignore[misc]
         r_budget = getattr(self, "_researcher_budget_total", 0)
         v_budget = getattr(self, "_validator_budget_total", 0)
         team_budget = getattr(self, "_team_budget_total", 0)
+        max_iterations = getattr(self, "_max_iterations", 3)
         agent1_name = getattr(self, "_agent1_name", "Researcher")
         agent2_name = getattr(self, "_agent2_name", "Validator")
 
-        lines = ["[BUDGET STATUS]"]
+        remaining_iterations = max_iterations - current_iteration
+
+        # Start with iteration context (temporal awareness)
+        lines = [
+            f"[STATUS: Iteration {current_iteration} of {max_iterations} complete]"
+        ]
 
         # Individual agent details (for OVERALL_AND_INDIVIDUAL)
         if awareness == MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL:
-            # Agent 1
-            r_pct = (r_total / r_budget * 100) if r_budget > 0 else 0
+            # Agent 1 - focus on remaining capacity
             r_remaining = max(0, r_budget - r_total)
+            r_remaining_pct = (r_remaining / r_budget * 100) if r_budget > 0 else 0
             lines.append(
-                f"{agent1_name}: {r_total:,} / {r_budget:,} tokens ({r_pct:.0f}% used, {r_remaining:,} remaining)"
+                f"{agent1_name}: {r_remaining:,} tokens available ({r_remaining_pct:.0f}% of allocation)"
             )
 
-            # Agent 2
-            v_pct = (v_total / v_budget * 100) if v_budget > 0 else 0
+            # Agent 2 - focus on remaining capacity
             v_remaining = max(0, v_budget - v_total)
+            v_remaining_pct = (v_remaining / v_budget * 100) if v_budget > 0 else 0
             lines.append(
-                f"{agent2_name}: {v_total:,} / {v_budget:,} tokens ({v_pct:.0f}% used, {v_remaining:,} remaining)"
+                f"{agent2_name}: {v_remaining:,} tokens available ({v_remaining_pct:.0f}% of allocation)"
             )
-            lines.append("")
 
-        # Team total (for OVERALL_ONLY and OVERALL_AND_INDIVIDUAL)
+        # Team summary (for OVERALL_ONLY and OVERALL_AND_INDIVIDUAL)
         if awareness in [
             MultiAgentAwarenessCondition.OVERALL_ONLY,
             MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL,
         ]:
-            team_pct = (team_total / team_budget * 100) if team_budget > 0 else 0
             team_remaining = max(0, team_budget - team_total)
+            team_remaining_pct = (
+                (team_remaining / team_budget * 100) if team_budget > 0 else 0
+            )
             lines.append(
-                f"Team total: {team_total:,} / {team_budget:,} tokens ({team_pct:.0f}% used, {team_remaining:,} remaining)"
+                f"Team: {team_remaining:,} tokens available ({team_remaining_pct:.0f}% remaining)"
             )
 
-            # Generate warning based on usage percentage
-            warning = self._get_warning_message(team_pct)
-            if warning:
+            # Add actionable guidance based on situation
+            guidance = self._get_actionable_guidance(
+                team_remaining_pct, remaining_iterations
+            )
+            if guidance:
                 lines.append("")
-                lines.append(warning)
+                lines.append(guidance)
 
         # Fallback for other conditions (just show usage)
         if awareness not in [
@@ -190,25 +218,36 @@ class CheckApprovalAgent(BaseAgent):  # type: ignore[misc]
             MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL,
         ]:
             lines.append(
-                f"Cumulative usage: Researcher {r_total:,}, Validator {v_total:,}, Team {team_total:,}"
+                f"Usage this iteration: {agent1_name} {r_total:,}, {agent2_name} {v_total:,}"
             )
 
         lines.append("")  # Blank line at end
         return "\n".join(lines)
 
-    def _get_warning_message(self, usage_pct: float) -> str:
-        """Generate warning message based on usage percentage.
+    def _get_actionable_guidance(
+        self, remaining_pct: float, remaining_iterations: int
+    ) -> str:
+        """Generate actionable guidance based on resources and iterations remaining.
+
+        Uses challenge framing (what you can do) not threat framing (what you can't).
 
         Args:
-            usage_pct: Percentage of budget used (0-100+)
+            remaining_pct: Percentage of budget remaining (0-100)
+            remaining_iterations: Number of iterations left
 
         Returns:
-            Warning message or empty string if no warning needed
+            Actionable guidance string
         """
-        if usage_pct >= 90:
-            return "🚨 CRITICAL: Over 90% budget used - be very concise!"
-        elif usage_pct >= 75:
-            return "⚠️  WARNING: Over 75% budget used - please be concise."
-        elif usage_pct >= 50:
-            return "ℹ️  NOTE: Over 50% budget used - monitor token usage carefully."
-        return ""
+        if remaining_iterations == 0:
+            # Final iteration - encourage focus
+            return "Final iteration: Focus on the specific issue identified."
+
+        if remaining_pct < 25:
+            # Low resources but still iterations left
+            return f"{remaining_iterations} iteration(s) left. Focus revisions on the specific failing test."
+        elif remaining_pct < 50:
+            # Moderate resources
+            return f"{remaining_iterations} iteration(s) available. Target the root cause of the failure."
+        else:
+            # Plenty of resources
+            return f"{remaining_iterations} iteration(s) available for refinement."

@@ -841,6 +841,10 @@ class AgentFactory:
         )
 
         # Create CheckApproval agent
+        # For aware condition: report_usage=True provides feedback loop for adaptation
+        # For unaware condition: report_usage=False (no budget info at all)
+        # This creates a realistic comparison: unaware agents get NO budget info,
+        # aware agents get both initial framing AND ongoing status updates
         report_usage = awareness_condition != MultiAgentAwarenessCondition.NO_AWARENESS
 
         approval_checker = CheckApprovalAgent(
@@ -855,6 +859,7 @@ class AgentFactory:
             agent2_name="Reviewer",
             approval_state_key="review_decision",
             approval_keyword="APPROVE",
+            max_iterations=max_iterations,
         )
 
         # Create TrackingLoopAgent

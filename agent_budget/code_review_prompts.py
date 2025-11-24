@@ -2,6 +2,10 @@
 
 This module provides prompt generation functions for the Coder-Reviewer
 iterative code review system.
+
+Part 2 Experiment Design (Simplified):
+- 2 conditions: NO_AWARENESS vs OVERALL_AND_INDIVIDUAL
+- Meaningful framing: Budget reflects role specialization, not just numbers
 """
 
 from agent_budget.core import (
@@ -10,6 +14,27 @@ from agent_budget.core import (
     CODE_REVIEW_TEAM_BUDGET,
     MultiAgentAwarenessCondition,
 )
+
+
+def escape_curly_braces(text: str) -> str:
+    """Escape curly braces to prevent ADK template variable substitution.
+
+    ADK treats {var_name} as template variables. Problem descriptions often
+    contain math notation like {K_i} which causes KeyError.
+
+    We replace curly braces with Unicode lookalikes that render identically
+    but won't be parsed as template variables.
+
+    Args:
+        text: Text that may contain curly braces
+
+    Returns:
+        Text with curly braces replaced with safe alternatives
+    """
+    # Use fullwidth curly brackets which look similar but aren't parsed
+    # ｛ (U+FF5B) and ｝ (U+FF5D)
+    # Or we can use angle brackets for math notation
+    return text.replace("{", "❴").replace("}", "❵")
 
 
 def generate_coder_instruction(
@@ -25,21 +50,23 @@ def generate_coder_instruction(
     Returns:
         Complete instruction string for Coder
     """
-    return f"""{budget_message}
+    # Budget message goes first if present (sets context)
+    prefix = f"{budget_message}\n\n" if budget_message else ""
 
-YOU ARE A PYTHON CODE GENERATOR. Your ONLY job is to write Python code.
+    # Escape curly braces in problem description to prevent ADK template errors
+    safe_problem = escape_curly_braces(problem_description)
 
-Problem to solve:
-{problem_description}
+    return f"""{prefix}You are a Python programmer. Write code to solve this problem.
 
-INSTRUCTIONS:
-1. Write a complete, working Python program
-2. The program must read input from stdin
-3. The program must write output to stdout
-4. If you see review feedback in the conversation history, FIX the code based on that feedback
-5. Return ONLY executable Python code - NO explanations, NO markdown, NO comments outside the code
+PROBLEM:
+{safe_problem}
 
-Your response should be pure Python code that can be executed immediately."""
+REQUIREMENTS:
+1. Write a complete Python program that reads from stdin and writes to stdout
+2. If you see feedback from the Reviewer, fix the issues they identified
+3. Output ONLY the Python code - no explanations or markdown
+
+Think through the algorithm carefully, then write clean, correct code."""
 
 
 def generate_reviewer_instruction(
@@ -53,18 +80,19 @@ def generate_reviewer_instruction(
     Returns:
         Complete instruction string for Reviewer
     """
-    return f"""{budget_message}
+    prefix = f"{budget_message}\n\n" if budget_message else ""
 
-Your task: Test the code and make a decision.
+    return f"""{prefix}You are a code reviewer. Test the code and decide whether to approve it.
 
-CRITICAL: You MUST use the test_code function. Do NOT write code yourself.
+WORKFLOW:
+1. Call test_code() to run the Coder's code against the test case
+2. Based on the result, make your decision
 
-Step 1: Call test_code() - it will automatically test the Coder's code
-Step 2: Based on the test result, output your decision
+OUTPUT FORMAT:
+DECISION: APPROVE (if tests pass) or REQUEST_REVISION (if tests fail)
+FEEDBACK: [Brief explanation of what happened]
 
-After calling test_code, output:
-DECISION: APPROVE or REQUEST_REVISION
-FEEDBACK: [what the test showed]"""
+Be concise - the test result tells you everything you need to know."""
 
 
 def generate_budget_message(
@@ -73,6 +101,12 @@ def generate_budget_message(
     agent_role: str = "",
 ) -> str:
     """Generate budget awareness message for agents.
+
+    Design principles (from literature review):
+    1. Challenge framing: Frame budget as "sufficient for" not "limited to"
+    2. Focusing dividend: Constraints help prioritize what matters
+    3. Role specialization: Give meaningful reason for allocation
+    4. Actionable: Tell agents what they CAN do, not just what they can't
 
     Args:
         awareness_condition: Budget awareness level
@@ -88,21 +122,40 @@ def generate_budget_message(
     # Get budget values
     team_total = CODE_REVIEW_TEAM_BUDGET
     coder_budget = CODE_REVIEW_CODER_BUDGET.total
+    coder_pct = round(100 * coder_budget / team_total)
     reviewer_budget = CODE_REVIEW_REVIEWER_BUDGET.total
+    reviewer_pct = round(100 * reviewer_budget / team_total)
 
     if awareness_condition == MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL:
-        # Role-specific message with individual and team awareness
-        agent_budget = coder_budget if agent_role == "Coder" else reviewer_budget
-        return f"""[BUDGET AWARENESS]
-Your team has a total budget of {team_total} tokens for this task.
-Your individual allocation: {agent_budget} tokens
-Maximum {max_iterations} iterations available.
-Use tokens wisely - be concise and focused.
-"""
+        if agent_role == "Coder":
+            # Challenge framing: emphasize adequacy and capability
+            return f"""[TEAM RESOURCES]
+You are the CODER in a 2-agent team.
 
-    # Fallback for other conditions (not used in clean 2x2 design)
-    return f"""[BUDGET AWARENESS]
-You are working in a team with a limited token budget.
-Maximum {max_iterations} iterations available.
-Use tokens wisely - be concise and focused.
-"""
+Your allocation: {coder_budget} tokens ({coder_pct}% of team)
+- Sufficient for deep algorithmic thinking and clean implementation
+- Focus your reasoning on getting the solution right the first time
+
+Your partner (Reviewer): {reviewer_budget} tokens ({reviewer_pct}%)
+- Tests your code and provides targeted feedback if needed
+
+You have {max_iterations} iterations to succeed. A focused first attempt is most efficient."""
+
+        else:  # Reviewer
+            # Challenge framing: emphasize tool efficiency
+            return f"""[TEAM RESOURCES]
+You are the REVIEWER in a 2-agent team.
+
+Your allocation: {reviewer_budget} tokens ({reviewer_pct}% of team)
+- Sufficient for test interpretation and clear feedback
+- The test_code tool handles execution - you analyze results and decide
+
+Your partner (Coder): {coder_budget} tokens ({coder_pct}%)
+
+You have {max_iterations} iterations. Be decisive: approve if tests pass, request specific fixes if not."""
+
+    # Fallback for other conditions (OVERALL_ONLY, RESERVE_AWARENESS)
+    # Not used in simplified 2x2 design but kept for compatibility
+    return f"""[TEAM RESOURCES]
+Team budget: {team_total} tokens across {max_iterations} iterations.
+This is sufficient for the task - focus on quality."""
