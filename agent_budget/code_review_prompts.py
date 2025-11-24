@@ -126,15 +126,25 @@ def generate_budget_message(
     reviewer_budget = CODE_REVIEW_REVIEWER_BUDGET.total
     reviewer_pct = round(100 * reviewer_budget / team_total)
 
+    # Get detailed budget breakdown for mechanism explanation
+    coder_thinking = CODE_REVIEW_CODER_BUDGET.reasoning_tokens
+    coder_output = CODE_REVIEW_CODER_BUDGET.output_tokens
+    reviewer_thinking = CODE_REVIEW_REVIEWER_BUDGET.reasoning_tokens
+    reviewer_output = CODE_REVIEW_REVIEWER_BUDGET.output_tokens
+
     if awareness_condition == MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL:
         if agent_role == "Coder":
-            # Challenge framing: emphasize adequacy and capability
+            # Challenge framing with mechanism explanation
             return f"""[TEAM RESOURCES]
 You are the CODER in a 2-agent team.
 
 Your allocation: {coder_budget} tokens ({coder_pct}% of team)
-- Sufficient for deep algorithmic thinking and clean implementation
-- Focus your reasoning on getting the solution right the first time
+- {coder_thinking} tokens for thinking/reasoning (internal deliberation)
+- {coder_output} tokens for output (your code)
+
+HOW TOKENS WORK: Both thinking and output consume your budget. Use them wisely:
+- Efficient thinking: Focus on the core algorithm, avoid over-analyzing edge cases
+- Efficient output: Write clean, complete code without verbose comments
 
 Your partner (Reviewer): {reviewer_budget} tokens ({reviewer_pct}%)
 - Tests your code and provides targeted feedback if needed
@@ -142,13 +152,17 @@ Your partner (Reviewer): {reviewer_budget} tokens ({reviewer_pct}%)
 You have {max_iterations} iterations to succeed. A focused first attempt is most efficient."""
 
         else:  # Reviewer
-            # Challenge framing: emphasize tool efficiency
+            # Challenge framing with mechanism explanation
             return f"""[TEAM RESOURCES]
 You are the REVIEWER in a 2-agent team.
 
 Your allocation: {reviewer_budget} tokens ({reviewer_pct}% of team)
-- Sufficient for test interpretation and clear feedback
-- The test_code tool handles execution - you analyze results and decide
+- {reviewer_thinking} tokens for thinking/reasoning
+- {reviewer_output} tokens for output (your decision)
+
+HOW TOKENS WORK: Both thinking and output consume your budget. Use them wisely:
+- The test_code tool execution is FREE (doesn't use tokens)
+- Your tokens are for interpreting results and writing feedback
 
 Your partner (Coder): {coder_budget} tokens ({coder_pct}%)
 

@@ -282,7 +282,7 @@ def analyze_paired_effects(results: dict[str, Any]) -> None:
 
     # By difficulty
     print("\nPaired Analysis by Difficulty:")
-    for difficulty in ["medium", "hard"]:
+    for difficulty in ["easy", "medium"]:
         diff_pairs = [
             (d["unaware"], d["aware"])
             for d in paired_details
@@ -364,7 +364,7 @@ def analyze_difficulty_moderation(results: dict[str, Any]) -> None:
     # 2×2 breakdown
     cells = {}
     for condition in ["NO_AWARENESS", "OVERALL_AND_INDIVIDUAL"]:
-        for difficulty in ["medium", "hard"]:
+        for difficulty in ["easy", "medium"]:
             cell_trials = [
                 t
                 for t in trials
@@ -377,12 +377,12 @@ def analyze_difficulty_moderation(results: dict[str, Any]) -> None:
     # Print 2×2 table with CIs
     print("\nSuccess Rates by Cell (with 95% CIs):")
     print("-" * 70)
-    print(f"{'Condition':<30} {'Medium':<20} {'Hard':<20}")
+    print(f"{'Condition':<30} {'Easy':<20} {'Medium':<20}")
     print("-" * 70)
 
     for condition in ["NO_AWARENESS", "OVERALL_AND_INDIVIDUAL"]:
         row = f"{condition:<30}"
-        for difficulty in ["medium", "hard"]:
+        for difficulty in ["easy", "medium"]:
             data = cells.get((condition, difficulty), [])
             if data:
                 ci = bootstrap_ci(data)
@@ -394,7 +394,7 @@ def analyze_difficulty_moderation(results: dict[str, Any]) -> None:
     # Compute awareness effect by difficulty
     print("\nAwareness Effect by Difficulty:")
 
-    for difficulty in ["medium", "hard"]:
+    for difficulty in ["easy", "medium"]:
         unaware = cells.get(("NO_AWARENESS", difficulty), [])
         aware = cells.get(("OVERALL_AND_INDIVIDUAL", difficulty), [])
 

@@ -47,7 +47,7 @@ class PilotConfig:
     awareness_conditions: list[str] = field(
         default_factory=lambda: ["NO_AWARENESS", "OVERALL_AND_INDIVIDUAL"]
     )
-    difficulties: list[str] = field(default_factory=lambda: ["medium", "hard"])
+    difficulties: list[str] = field(default_factory=lambda: ["easy", "medium"])
 
     # Execution
     max_iterations: int = 3
