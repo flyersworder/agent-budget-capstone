@@ -3,16 +3,18 @@
 Tests how budget awareness affects Coder-Reviewer team performance on
 LiveCodeBench problems.
 
-Design:
+Design (WITHIN-SUBJECTS):
 - 2 awareness conditions: NO_AWARENESS vs OVERALL_AND_INDIVIDUAL
 - 2 difficulty levels: MEDIUM vs HARD
-- 20 problems per cell = 80 total trials
-- Sufficient for bootstrap confidence intervals
+- 20 unique problems per difficulty level = 40 unique problems
+- Each problem tested with BOTH conditions = 80 total trials
+- Within-subjects allows paired comparisons for more statistical power
 
 Sample size rationale:
-- 20 per cell gives ~80% power to detect medium effect (d=0.5)
+- 20 problems per difficulty × 2 conditions = 40 paired comparisons per difficulty
+- Paired design increases power vs between-subjects
 - Bootstrap with 10,000 resamples provides stable CIs
-- Can detect ~15pp difference with reasonable confidence
+- McNemar's test for paired binary outcomes
 
 Usage:
     python -m experiments.part2_multi_agent.run_code_review_pilot
@@ -38,8 +40,8 @@ from agent_budget.core import MultiAgentAwarenessCondition
 class PilotConfig:
     """Configuration for pilot study."""
 
-    # Sample sizes
-    problems_per_cell: int = 20  # 20 per cell in 2x2 design = 80 total
+    # Sample sizes (within-subjects: each problem tested with both conditions)
+    problems_per_difficulty: int = 20  # 20 medium + 20 hard = 40 unique problems
 
     # Conditions
     awareness_conditions: list[str] = field(
@@ -114,6 +116,9 @@ def select_problems(
 ) -> list[tuple[dict[str, Any], str]]:
     """Select problems for the pilot with stratified sampling.
 
+    Within-subjects design: selects N unique problems per difficulty.
+    Each problem will be tested with both conditions.
+
     Returns:
         List of (problem, difficulty) tuples
     """
@@ -122,7 +127,7 @@ def select_problems(
 
     for difficulty in config.difficulties:
         available = problems_by_difficulty[difficulty]
-        n_needed = config.problems_per_cell * len(config.awareness_conditions)
+        n_needed = config.problems_per_difficulty
 
         if len(available) < n_needed:
             print(
@@ -153,16 +158,19 @@ async def run_pilot(config: PilotConfig | None = None) -> PilotResults:
         config = PilotConfig()
 
     print("=" * 80)
-    print("PART 2 CODE REVIEW PILOT STUDY")
+    print("PART 2 CODE REVIEW PILOT STUDY (WITHIN-SUBJECTS)")
     print("=" * 80)
     print()
     print("Configuration:")
-    print(f"  Problems per cell: {config.problems_per_cell}")
-    print(f"  Awareness conditions: {config.awareness_conditions}")
+    print(f"  Problems per difficulty: {config.problems_per_difficulty}")
     print(f"  Difficulties: {config.difficulties}")
+    print(f"  Awareness conditions: {config.awareness_conditions}")
     print(f"  Max iterations: {config.max_iterations}")
+    n_unique = config.problems_per_difficulty * len(config.difficulties)
+    n_trials = n_unique * len(config.awareness_conditions)
+    print(f"  Unique problems: {n_unique}")
     print(
-        f"  Total trials: {config.problems_per_cell * len(config.difficulties) * len(config.awareness_conditions)}"
+        f"  Total trials: {n_trials} (each problem × {len(config.awareness_conditions)} conditions)"
     )
     print()
 
@@ -170,7 +178,7 @@ async def run_pilot(config: PilotConfig | None = None) -> PilotResults:
     problems_by_difficulty = load_problems(config)
     selected_problems = select_problems(problems_by_difficulty, config)
 
-    print(f"\nSelected {len(selected_problems)} problem instances")
+    print(f"\nSelected {len(selected_problems)} unique problems")
 
     # Initialize results
     results = PilotResults(
@@ -185,35 +193,27 @@ async def run_pilot(config: PilotConfig | None = None) -> PilotResults:
         "OVERALL_AND_INDIVIDUAL": MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL,
     }
 
-    # Run trials
-    # Each problem gets tested with each awareness condition
+    # Run trials - WITHIN-SUBJECTS DESIGN
+    # Each problem is tested with BOTH awareness conditions
+    # This gives us paired comparisons for more statistical power
     trial_num = 0
-    total_trials = len(selected_problems)
 
-    # Group problems by their identity to test same problem with both conditions
+    # Deduplicate problems (in case same problem appears multiple times)
     problem_groups: dict[str, tuple[dict[str, Any], str]] = {}
     for problem, difficulty in selected_problems:
         pid = problem.get("question_id", str(hash(problem["question_title"])))
         problem_groups[pid] = (problem, difficulty)
 
-    # Now assign half to each condition
-    problem_ids = list(problem_groups.keys())
-    random.seed(config.random_seed)
-    random.shuffle(problem_ids)
-
-    # Split problems: each problem tested with ONE condition (between-subjects)
-    problems_per_condition = len(problem_ids) // len(config.awareness_conditions)
-
+    # Create assignments: each problem × each condition
     # (problem, difficulty, condition_str)
     assignments: list[tuple[dict[str, Any], str, str]] = []
-    for i, cond_str in enumerate(config.awareness_conditions):
-        start_idx = i * problems_per_condition
-        end_idx = start_idx + problems_per_condition
-        for pid in problem_ids[start_idx:end_idx]:
-            problem, difficulty = problem_groups[pid]
+    for pid, (problem, difficulty) in problem_groups.items():
+        for cond_str in config.awareness_conditions:
             assignments.append((problem, difficulty, cond_str))
 
-    random.shuffle(assignments)  # Randomize execution order
+    # Randomize execution order to avoid systematic effects
+    random.seed(config.random_seed)
+    random.shuffle(assignments)
     total_trials = len(assignments)
 
     print(f"\nStarting {total_trials} trials...")
@@ -405,7 +405,7 @@ async def main() -> None:
     load_dotenv()
 
     config = PilotConfig(
-        problems_per_cell=20,  # 20 per cell × 2 conditions × 2 difficulties = 80 total
+        problems_per_difficulty=20,  # 20 medium + 20 hard = 40 problems × 2 conditions = 80 trials
         random_seed=42,
     )
 
@@ -418,7 +418,7 @@ async def main() -> None:
     print("=" * 80)
     print("\nNext steps:")
     print("  1. Run: python -m experiments.part2_multi_agent.analyze_code_review_pilot")
-    print("  2. Review bootstrap confidence intervals")
+    print("  2. Review paired comparisons and bootstrap CIs")
     print("  3. Decide on full study parameters")
 
 

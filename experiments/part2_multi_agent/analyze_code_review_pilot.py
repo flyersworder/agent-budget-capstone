@@ -3,9 +3,10 @@
 Provides statistical analysis including:
 1. Success rates by condition and difficulty
 2. Bootstrap confidence intervals for effect sizes
-3. Interaction effects (condition × difficulty)
-4. Token usage patterns
-5. Direction of effect assessment
+3. Paired analysis with McNemar's test (within-subjects design)
+4. Interaction effects (condition × difficulty)
+5. Token usage patterns
+6. Direction of effect assessment
 
 Usage:
     python -m experiments.part2_multi_agent.analyze_code_review_pilot
@@ -136,6 +137,165 @@ def bootstrap_difference_ci(
     ci_upper = float(np.percentile(bootstrap_diffs, (1 - alpha / 2) * 100))
 
     return (point_diff, ci_lower, ci_upper)
+
+
+def mcnemars_test(
+    paired_outcomes: list[tuple[int, int]],
+) -> tuple[float, float, str]:
+    """McNemar's test for paired binary outcomes.
+
+    For within-subjects design where same problem tested under both conditions.
+
+    Args:
+        paired_outcomes: List of (unaware_success, aware_success) tuples
+                        where 1=success, 0=failure
+
+    Returns:
+        Tuple of (test_statistic, p_value, interpretation)
+    """
+    # Build contingency table
+    # b = unaware fails, aware succeeds (awareness helps)
+    # c = unaware succeeds, aware fails (awareness hurts)
+    b = 0  # Discordant: unaware=0, aware=1
+    c = 0  # Discordant: unaware=1, aware=0
+
+    for unaware, aware in paired_outcomes:
+        if unaware == 0 and aware == 1:
+            b += 1
+        elif unaware == 1 and aware == 0:
+            c += 1
+
+    # McNemar's test statistic (with continuity correction)
+    if b + c == 0:
+        return (0.0, 1.0, "No discordant pairs - cannot compute")
+
+    # Exact binomial test for small samples
+    n_discordant = b + c
+
+    if n_discordant < 25:
+        # Use exact binomial test
+        from math import comb
+
+        # Two-tailed p-value: P(X <= min(b,c)) + P(X >= max(b,c))
+        k = min(b, c)
+        p_value = 0.0
+        for i in range(k + 1):
+            p_value += comb(n_discordant, i) * (0.5**n_discordant)
+        p_value *= 2  # Two-tailed
+        p_value = min(p_value, 1.0)  # Cap at 1
+
+        test_stat = float(b - c)
+    else:
+        # Chi-squared approximation with continuity correction
+        test_stat = ((abs(b - c) - 1) ** 2) / (b + c)
+        # Approximate p-value from chi-squared(1)
+        # Using Wilson-Hilferty approximation
+        z = np.sqrt(test_stat)
+        p_value = 2 * (1 - 0.5 * (1 + np.math.erf(z / np.sqrt(2))))
+
+    # Interpretation
+    if b > c:
+        direction = "Awareness HELPS"
+    elif c > b:
+        direction = "Awareness HURTS"
+    else:
+        direction = "No difference"
+
+    interpretation = f"{direction} (b={b}, c={c})"
+
+    return (test_stat, p_value, interpretation)
+
+
+def analyze_paired_effects(results: dict[str, Any]) -> None:
+    """Analyze paired effects using McNemar's test (within-subjects design).
+
+    Groups trials by problem and compares outcomes across conditions.
+    """
+    print("\n" + "=" * 80)
+    print("PAIRED ANALYSIS (WITHIN-SUBJECTS DESIGN)")
+    print("=" * 80)
+
+    trials = results["trials"]
+
+    # Group by problem_id
+    problems: dict[str, dict[str, dict[str, Any]]] = {}
+    for t in trials:
+        pid = t["problem_id"]
+        cond = t["awareness_condition"]
+        if pid not in problems:
+            problems[pid] = {}
+        problems[pid][cond] = t
+
+    # Build paired outcomes
+    paired_outcomes: list[tuple[int, int]] = []
+    paired_details: list[dict[str, Any]] = []
+
+    for pid, conditions in problems.items():
+        if "NO_AWARENESS" in conditions and "OVERALL_AND_INDIVIDUAL" in conditions:
+            unaware_success = 1 if conditions["NO_AWARENESS"]["success"] else 0
+            aware_success = 1 if conditions["OVERALL_AND_INDIVIDUAL"]["success"] else 0
+            paired_outcomes.append((unaware_success, aware_success))
+            paired_details.append(
+                {
+                    "problem_id": pid,
+                    "difficulty": conditions["NO_AWARENESS"]["difficulty"],
+                    "unaware": unaware_success,
+                    "aware": aware_success,
+                }
+            )
+
+    n_pairs = len(paired_outcomes)
+    print(f"\nPaired problems: {n_pairs}")
+
+    if n_pairs == 0:
+        print("No paired data available for analysis")
+        return
+
+    # Concordance table
+    both_success = sum(1 for u, a in paired_outcomes if u == 1 and a == 1)
+    both_fail = sum(1 for u, a in paired_outcomes if u == 0 and a == 0)
+    unaware_only = sum(1 for u, a in paired_outcomes if u == 1 and a == 0)
+    aware_only = sum(1 for u, a in paired_outcomes if u == 0 and a == 1)
+
+    print("\nConcordance Table:")
+    print("                    Aware Success    Aware Fail")
+    print(f"  Unaware Success:      {both_success:3d}             {unaware_only:3d}")
+    print(f"  Unaware Fail:         {aware_only:3d}             {both_fail:3d}")
+
+    print(f"\n  Concordant pairs: {both_success + both_fail} (both same outcome)")
+    print(f"  Discordant pairs: {unaware_only + aware_only}")
+    print(f"    - Awareness helped: {aware_only} (unaware failed, aware succeeded)")
+    print(f"    - Awareness hurt: {unaware_only} (unaware succeeded, aware failed)")
+
+    # McNemar's test
+    stat, p_value, interpretation = mcnemars_test(paired_outcomes)
+
+    print("\nMcNemar's Test:")
+    print(f"  Test statistic: {stat:.3f}")
+    print(f"  p-value: {p_value:.4f}")
+    print(f"  Interpretation: {interpretation}")
+
+    if p_value < 0.05:
+        print("  → Statistically significant (p < 0.05)")
+    else:
+        print("  → Not statistically significant (p >= 0.05)")
+
+    # By difficulty
+    print("\nPaired Analysis by Difficulty:")
+    for difficulty in ["medium", "hard"]:
+        diff_pairs = [
+            (d["unaware"], d["aware"])
+            for d in paired_details
+            if d["difficulty"] == difficulty
+        ]
+        if diff_pairs:
+            stat, p_value, interp = mcnemars_test(diff_pairs)
+            aware_helps = sum(1 for u, a in diff_pairs if u == 0 and a == 1)
+            aware_hurts = sum(1 for u, a in diff_pairs if u == 1 and a == 0)
+            print(
+                f"  {difficulty.upper()}: n={len(diff_pairs)}, "
+                f"helps={aware_helps}, hurts={aware_hurts}, p={p_value:.3f}"
+            )
 
 
 def analyze_main_effects(results: dict[str, Any]) -> None:
@@ -493,6 +653,7 @@ def main() -> None:
     print(f"Analyzing {results['total_trials']} trials\n")
 
     analyze_main_effects(results)
+    analyze_paired_effects(results)  # Within-subjects paired analysis
     analyze_difficulty_moderation(results)
     analyze_token_usage(results)
     analyze_iterations(results)
