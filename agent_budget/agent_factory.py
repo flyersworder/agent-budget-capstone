@@ -24,14 +24,14 @@ from .code_review_prompts import (
     generate_reviewer_instruction,
 )
 from .core import (
-    CODE_REVIEW_CODER_BUDGET,
     CODE_REVIEW_REVIEWER_BUDGET,
-    CODE_REVIEW_TEAM_BUDGET,
     AgentRole,
     IterativeTeamConfig,
     MultiAgentAwarenessCondition,
     MultiAgentBudgetConfig,
     TokenBudget,
+    get_coder_budget,
+    get_code_review_team_budget,
 )
 from .loop_agents import CheckApprovalAgent
 from .tracking_loop_agent import TrackingLoopAgent
@@ -770,6 +770,7 @@ class AgentFactory:
         test_code_tool: FunctionTool,
         awareness_condition: MultiAgentAwarenessCondition = MultiAgentAwarenessCondition.NO_AWARENESS,
         max_iterations: int = 3,
+        difficulty: str = "medium",
     ) -> TrackingLoopAgent:
         """Create code review team for iterative Coder-Reviewer workflow.
 
@@ -784,16 +785,27 @@ class AgentFactory:
             test_code_tool: FunctionTool for testing code (problem-specific)
             awareness_condition: Budget awareness level
             max_iterations: Maximum iterations (default: 3)
+            difficulty: Problem difficulty ("easy" or "medium") for budget scaling
 
         Returns:
             TrackingLoopAgent with Coder, Reviewer, and CheckApproval agents
         """
-        # Generate budget awareness messages
+        # Get difficulty-based coder budget
+        coder_budget = get_coder_budget(difficulty)
+        team_budget = get_code_review_team_budget(difficulty)
+
+        # Generate budget awareness messages (with difficulty for correct budget values)
         coder_budget_message = generate_budget_message(
-            awareness_condition, max_iterations, agent_role="Coder"
+            awareness_condition,
+            max_iterations,
+            agent_role="Coder",
+            difficulty=difficulty,
         )
         reviewer_budget_message = generate_budget_message(
-            awareness_condition, max_iterations, agent_role="Reviewer"
+            awareness_condition,
+            max_iterations,
+            agent_role="Reviewer",
+            difficulty=difficulty,
         )
 
         # Create Coder agent
@@ -811,12 +823,12 @@ class AgentFactory:
             tools=[],  # No tools - just write code directly
             planner=BuiltInPlanner(
                 thinking_config=types.ThinkingConfig(
-                    thinking_budget=CODE_REVIEW_CODER_BUDGET.reasoning_tokens,
+                    thinking_budget=coder_budget.reasoning_tokens,
                     include_thoughts=True,
                 )
             ),
             generate_content_config=types.GenerateContentConfig(
-                max_output_tokens=CODE_REVIEW_CODER_BUDGET.total,
+                max_output_tokens=coder_budget.total,
                 temperature=0.2,
             ),
         )
@@ -852,9 +864,9 @@ class AgentFactory:
             description="Checks review decision and escalates if approved",
             report_usage=report_usage,
             awareness_condition=awareness_condition,
-            researcher_budget_total=CODE_REVIEW_CODER_BUDGET.total,
+            researcher_budget_total=coder_budget.total,
             validator_budget_total=CODE_REVIEW_REVIEWER_BUDGET.total,
-            team_budget_total=CODE_REVIEW_TEAM_BUDGET,
+            team_budget_total=team_budget,
             agent1_name="Coder",
             agent2_name="Reviewer",
             approval_state_key="review_decision",

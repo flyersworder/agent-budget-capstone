@@ -232,6 +232,7 @@ async def run_pilot(config: PilotConfig | None = None) -> PilotResults:
                 problem=problem,
                 awareness_condition=condition,
                 max_iterations=config.max_iterations,
+                difficulty=difficulty,
             )
 
             # Convert to dict for storage
@@ -249,11 +250,38 @@ async def run_pilot(config: PilotConfig | None = None) -> PilotResults:
                 "team_total_tokens": trial_result.team_total_tokens,
                 "duration_seconds": time.time() - start_time,
                 "error": None,
+                # New failure analysis fields
+                "failure_reason": trial_result.failure_reason.value,
+                "any_truncation": trial_result.any_truncation,
+                # Per-iteration truncation details
+                "iteration_truncations": [
+                    {
+                        "iteration": d.iteration,
+                        "is_truncated": d.truncation_info.is_truncated
+                        if d.truncation_info
+                        else False,
+                        "tokens_at_limit": d.truncation_info.tokens_at_limit
+                        if d.truncation_info
+                        else False,
+                        "syntax_valid": d.truncation_info.syntax_valid
+                        if d.truncation_info
+                        else True,
+                        "coder_tokens": d.coder_total_tokens,
+                        "failure_reason": d.failure_reason.value,
+                    }
+                    for d in trial_result.iteration_details
+                ],
             }
 
+            # Show status with failure reason
             status = "✓" if trial_result.success else "✗"
+            extra_info = ""
+            if not trial_result.success:
+                extra_info = f" [{trial_result.failure_reason.value}]"
+                if trial_result.any_truncation:
+                    extra_info += " ⚠️TRUNC"
             print(
-                f"  Result: {status} | Iterations: {trial_result.num_iterations} | "
+                f"  Result: {status}{extra_info} | Iterations: {trial_result.num_iterations} | "
                 f"Tokens: {trial_result.team_total_tokens}"
             )
 
@@ -273,6 +301,10 @@ async def run_pilot(config: PilotConfig | None = None) -> PilotResults:
                 "team_total_tokens": 0,
                 "duration_seconds": time.time() - start_time,
                 "error": str(e),
+                # New failure analysis fields
+                "failure_reason": "error",
+                "any_truncation": False,
+                "iteration_truncations": [],
             }
 
         results.trials.append(trial_dict)
@@ -335,6 +367,25 @@ def print_summary(results: PilotResults) -> None:
     )
     print(f"Failed: {results.failed_trials}")
 
+    # Failure reason breakdown
+    print("\n" + "-" * 40)
+    print("FAILURE REASON BREAKDOWN:")
+    print("-" * 40)
+
+    failure_counts: dict[str, int] = {}
+    truncation_count = 0
+    for t in results.trials:
+        if not t["success"]:
+            reason = t.get("failure_reason", "unknown")
+            failure_counts[reason] = failure_counts.get(reason, 0) + 1
+        if t.get("any_truncation", False):
+            truncation_count += 1
+
+    for reason, count in sorted(failure_counts.items(), key=lambda x: -x[1]):
+        print(f"  {reason}: {count}")
+
+    print(f"\nTrials with ANY truncation: {truncation_count}/{results.total_trials}")
+
     # By condition
     print("\n" + "-" * 40)
     print("BY AWARENESS CONDITION:")
@@ -361,31 +412,33 @@ def print_summary(results: PilotResults) -> None:
     print("BY DIFFICULTY:")
     print("-" * 40)
 
-    for difficulty in ["medium", "hard"]:
+    for difficulty in ["easy", "medium"]:
         trials = [t for t in results.trials if t["difficulty"] == difficulty]
         if not trials:
             continue
 
         successes = sum(1 for t in trials if t["success"])
         avg_iterations = sum(t["num_iterations"] for t in trials) / len(trials)
+        truncations = sum(1 for t in trials if t.get("any_truncation", False))
 
         print(f"\n{difficulty.upper()}:")
         print(
             f"  Success rate: {successes}/{len(trials)} ({successes / len(trials) * 100:.1f}%)"
         )
         print(f"  Avg iterations: {avg_iterations:.2f}")
+        print(f"  Truncations: {truncations}/{len(trials)}")
 
     # By condition × difficulty (2×2 design)
     print("\n" + "-" * 40)
     print("BY CONDITION × DIFFICULTY:")
     print("-" * 40)
 
-    print(f"\n{'Condition':<30} {'Medium':<15} {'Hard':<15}")
+    print(f"\n{'Condition':<30} {'Easy':<15} {'Medium':<15}")
     print("-" * 60)
 
     for condition in ["NO_AWARENESS", "OVERALL_AND_INDIVIDUAL"]:
         row = f"{condition:<30}"
-        for difficulty in ["medium", "hard"]:
+        for difficulty in ["easy", "medium"]:
             trials = [
                 t
                 for t in results.trials

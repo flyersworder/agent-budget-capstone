@@ -9,10 +9,10 @@ Part 2 Experiment Design (Simplified):
 """
 
 from agent_budget.core import (
-    CODE_REVIEW_CODER_BUDGET,
     CODE_REVIEW_REVIEWER_BUDGET,
-    CODE_REVIEW_TEAM_BUDGET,
     MultiAgentAwarenessCondition,
+    get_coder_budget,
+    get_code_review_team_budget,
 )
 
 
@@ -99,6 +99,7 @@ def generate_budget_message(
     awareness_condition: MultiAgentAwarenessCondition,
     max_iterations: int,
     agent_role: str = "",
+    difficulty: str = "medium",
 ) -> str:
     """Generate budget awareness message for agents.
 
@@ -112,6 +113,7 @@ def generate_budget_message(
         awareness_condition: Budget awareness level
         max_iterations: Maximum iterations
         agent_role: Agent role ("Coder" or "Reviewer")
+        difficulty: Problem difficulty ("easy" or "medium") for budget lookup
 
     Returns:
         Budget message (empty for NO_AWARENESS)
@@ -119,16 +121,17 @@ def generate_budget_message(
     if awareness_condition == MultiAgentAwarenessCondition.NO_AWARENESS:
         return ""
 
-    # Get budget values
-    team_total = CODE_REVIEW_TEAM_BUDGET
-    coder_budget = CODE_REVIEW_CODER_BUDGET.total
+    # Get difficulty-based budget values
+    coder_budget_obj = get_coder_budget(difficulty)
+    team_total = get_code_review_team_budget(difficulty)
+    coder_budget = coder_budget_obj.total
     coder_pct = round(100 * coder_budget / team_total)
     reviewer_budget = CODE_REVIEW_REVIEWER_BUDGET.total
     reviewer_pct = round(100 * reviewer_budget / team_total)
 
     # Get detailed budget breakdown for mechanism explanation
-    coder_thinking = CODE_REVIEW_CODER_BUDGET.reasoning_tokens
-    coder_output = CODE_REVIEW_CODER_BUDGET.output_tokens
+    coder_thinking = coder_budget_obj.reasoning_tokens
+    coder_output = coder_budget_obj.output_tokens
     reviewer_thinking = CODE_REVIEW_REVIEWER_BUDGET.reasoning_tokens
     reviewer_output = CODE_REVIEW_REVIEWER_BUDGET.output_tokens
 

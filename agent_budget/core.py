@@ -288,23 +288,63 @@ class MultiAgentBudgetConfig:
 # Code review budgets optimized for LiveCodeBench problems
 #
 # Design rationale:
-# - Coder (~86%): Needs substantial thinking for algorithm design + code output
-#   Increased from 2048 to 3072 to handle medium difficulty problems
-# - Reviewer (~14%): Tool execution is FREE (outside LLM), just needs tokens
-#   to call test_code() and interpret the result
+# - Per-difficulty budgets create similar "relative tightness" across difficulties
+# - Easy problems typically need 1200-1800 tokens → budget 2000 (~15-40% headroom)
+# - Medium problems typically need 1800-2500 tokens → budget 3000 (~15-40% headroom)
+# - This ensures budget awareness has opportunity to matter at each difficulty level
+# - Note: max_output_tokens caps BOTH thinking AND output combined
 #
-# Total team budget: 3584 tokens
-CODE_REVIEW_CODER_BUDGET = TokenBudget(
-    reasoning_tokens=2048,  # Thinking for algorithm design
-    output_tokens=1024,  # Code output (medium problems need more space)
-)  # 3072 total (~86% of team)
+# Reviewer budget is constant (tool execution is FREE, just needs tokens for decision)
 
+# Per-difficulty coder budgets
+CODE_REVIEW_CODER_BUDGETS: dict[str, TokenBudget] = {
+    "easy": TokenBudget(
+        reasoning_tokens=1000,  # Thinking for algorithm design
+        output_tokens=1000,  # Code output
+    ),  # 2000 total
+    "medium": TokenBudget(
+        reasoning_tokens=1500,  # Thinking for algorithm design
+        output_tokens=1500,  # Code output
+    ),  # 3000 total
+}
+
+# Default coder budget (used if difficulty not specified or not in dict)
+CODE_REVIEW_CODER_BUDGET = CODE_REVIEW_CODER_BUDGETS["medium"]
+
+# Reviewer budget (same for all difficulties - task is simple)
 CODE_REVIEW_REVIEWER_BUDGET = TokenBudget(
     reasoning_tokens=256,  # Minimal thinking (tool does the work)
     output_tokens=256,  # Decision output (APPROVE/REVISE + brief feedback)
-)  # 512 total (~14% of team)
+)  # 512 total
 
-CODE_REVIEW_TEAM_BUDGET = 3584  # Total budget for Coder + Reviewer
+
+def get_code_review_team_budget(difficulty: str = "medium") -> int:
+    """Get total team budget for a given difficulty.
+
+    Args:
+        difficulty: Problem difficulty ("easy" or "medium")
+
+    Returns:
+        Total team budget (coder + reviewer)
+    """
+    coder_budget = CODE_REVIEW_CODER_BUDGETS.get(difficulty, CODE_REVIEW_CODER_BUDGET)
+    return coder_budget.total + CODE_REVIEW_REVIEWER_BUDGET.total
+
+
+def get_coder_budget(difficulty: str = "medium") -> TokenBudget:
+    """Get coder budget for a given difficulty.
+
+    Args:
+        difficulty: Problem difficulty ("easy" or "medium")
+
+    Returns:
+        TokenBudget for coder
+    """
+    return CODE_REVIEW_CODER_BUDGETS.get(difficulty, CODE_REVIEW_CODER_BUDGET)
+
+
+# Legacy constant for backward compatibility (defaults to medium)
+CODE_REVIEW_TEAM_BUDGET = get_code_review_team_budget("medium")
 
 
 # ============================================================================
