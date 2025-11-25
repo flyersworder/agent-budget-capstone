@@ -3,10 +3,15 @@
 This module provides prompt generation functions for the Coder-Reviewer
 iterative code review system.
 
-Part 2 Experiment Design (Simplified):
-- 2 conditions: NO_AWARENESS vs OVERALL_AND_INDIVIDUAL
-- Neutral framing: Just facts, no motivational language
+Part 2 Experiment Design:
+- 3 conditions: NO_AWARENESS vs OVERALL_AND_INDIVIDUAL vs PLANNER_ESTIMATED
+- Consequence-aware framing: Facts about what happens when limits are hit
+
+Part 2 Extension:
+- PLANNER_ESTIMATED: Uses problem-specific estimates from planning agent
 """
+
+from typing import Any
 
 from agent_budget.core import (
     CODE_REVIEW_REVIEWER_BUDGET,
@@ -101,6 +106,7 @@ def generate_budget_message(
     max_iterations: int,
     agent_role: str = "",
     difficulty: str = "medium",
+    planner_estimate: dict[str, Any] | None = None,
 ) -> str:
     """Generate budget awareness message for agents.
 
@@ -112,6 +118,8 @@ def generate_budget_message(
         max_iterations: Maximum iterations
         agent_role: Agent role ("Coder" or "Reviewer")
         difficulty: Problem difficulty ("easy" or "medium") for budget lookup
+        planner_estimate: Optional dict with planner estimates for PLANNER_ESTIMATED
+            Expected keys: estimated_tokens_per_iteration, estimated_iterations
 
     Returns:
         Budget message (empty for NO_AWARENESS)
@@ -135,6 +143,32 @@ def generate_budget_message(
             return f"""[RESOURCE CONSTRAINTS]
 - {reviewer_budget} tokens per iteration (output is cut off if exceeded)
 - {max_iterations} iterations maximum (task fails if all used without success)"""
+
+    if awareness_condition == MultiAgentAwarenessCondition.PLANNER_ESTIMATED:
+        # Use planner estimates if available, fall back to fixed budgets
+        if planner_estimate:
+            estimated_tokens = planner_estimate.get(
+                "estimated_tokens_per_iteration", coder_budget
+            )
+            estimated_iterations = planner_estimate.get(
+                "estimated_iterations", max_iterations
+            )
+        else:
+            # Fallback if no planner estimate provided
+            estimated_tokens = coder_budget
+            estimated_iterations = max_iterations
+
+        if agent_role == "Coder":
+            # Same consequence-aware framing but with planner estimates
+            return f"""[RESOURCE CONSTRAINTS - ESTIMATED FOR THIS PROBLEM]
+- {estimated_tokens} tokens per iteration (output is cut off if exceeded)
+- {estimated_iterations} iterations expected (task fails if {max_iterations} used without success)"""
+
+        else:  # Reviewer
+            # Reviewer still uses fixed budget (their task is consistent)
+            return f"""[RESOURCE CONSTRAINTS]
+- {reviewer_budget} tokens per iteration (output is cut off if exceeded)
+- {estimated_iterations} iterations expected (task fails if {max_iterations} used without success)"""
 
     # Fallback for other conditions - return empty (not used in current design)
     return ""

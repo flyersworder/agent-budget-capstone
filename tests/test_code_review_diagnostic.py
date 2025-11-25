@@ -34,6 +34,7 @@ from google.genai import types  # noqa: E402
 
 from agent_budget.agent_factory import AgentFactory  # noqa: E402
 from agent_budget.core import MultiAgentAwarenessCondition  # noqa: E402
+from agent_budget.planner import estimate_budget  # noqa: E402
 
 
 # Global counters for diagnostics
@@ -187,6 +188,7 @@ async def run_diagnostic_trial(
     problem: dict,
     awareness_condition: MultiAgentAwarenessCondition,
     max_iterations: int = 3,
+    planner_estimate: dict | None = None,
 ) -> dict:
     """Run a single trial with full diagnostic output."""
 
@@ -217,6 +219,7 @@ async def run_diagnostic_trial(
         test_code_tool=test_code_tool,
         awareness_condition=awareness_condition,
         max_iterations=max_iterations,
+        planner_estimate=planner_estimate,
     )
 
     # Run
@@ -315,7 +318,7 @@ async def run_diagnostic_trial(
 
 
 def show_prompt_comparison():
-    """Show prompts for both conditions to verify correctness."""
+    """Show prompts for all conditions to verify correctness."""
     from agent_budget.code_review_prompts import (
         generate_budget_message,
         generate_coder_instruction,
@@ -323,17 +326,31 @@ def show_prompt_comparison():
     )
 
     print("=" * 80)
-    print("PROMPT COMPARISON: NO_AWARENESS vs OVERALL_AND_INDIVIDUAL")
+    print("PROMPT COMPARISON: ALL CONDITIONS")
     print("=" * 80)
 
     sample_problem = "Write a function to find the maximum subarray sum."
 
-    for condition in [
-        MultiAgentAwarenessCondition.NO_AWARENESS,
-        MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL,
-    ]:
+    # Sample planner estimate for PLANNER_ESTIMATED condition
+    sample_planner_estimate = {
+        "estimated_tokens_per_iteration": 1800,
+        "estimated_iterations": 2,
+        "reasoning": "Medium complexity dynamic programming problem.",
+    }
+
+    conditions_to_show = [
+        (MultiAgentAwarenessCondition.NO_AWARENESS, None),
+        (MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL, None),
+        (MultiAgentAwarenessCondition.PLANNER_ESTIMATED, sample_planner_estimate),
+    ]
+
+    for condition, planner_est in conditions_to_show:
         print(f"\n{'=' * 40}")
         print(f"CONDITION: {condition.value}")
+        if planner_est:
+            print(
+                f"  Planner estimate: {planner_est['estimated_tokens_per_iteration']} tokens, {planner_est['estimated_iterations']} iterations"
+            )
         print("=" * 40)
 
         # Generate budget messages
@@ -342,12 +359,14 @@ def show_prompt_comparison():
             max_iterations=3,
             agent_role="Coder",
             difficulty="medium",
+            planner_estimate=planner_est,
         )
         reviewer_budget_msg = generate_budget_message(
             awareness_condition=condition,
             max_iterations=3,
             agent_role="Reviewer",
             difficulty="medium",
+            planner_estimate=planner_est,
         )
 
         # Generate full instructions
@@ -403,20 +422,24 @@ async def main():
     test_difficulty = os.environ.get("TEST_DIFFICULTY", "easy")
     test_problems = problems_by_diff.get(test_difficulty, [])
 
-    # Test multiple problems with BOTH conditions
+    # Test multiple problems with ALL conditions
     if not test_problems:
         print(f"No {test_difficulty} problems found!")
         return
 
     # Get a few different problems to test variety
-    num_problems = min(3, len(test_problems))
+    num_problems = min(
+        2, len(test_problems)
+    )  # Reduced to 2 since we have 3 conditions now
     selected_problems = test_problems[:num_problems]
 
-    print(f"\nTesting {num_problems} problems with both conditions...")
+    print(f"\nTesting {num_problems} problems with all 3 conditions...")
 
+    # Conditions: NO_AWARENESS, OVERALL_AND_INDIVIDUAL (fixed), PLANNER_ESTIMATED
     conditions_to_test = [
-        MultiAgentAwarenessCondition.NO_AWARENESS,
-        MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL,
+        (MultiAgentAwarenessCondition.NO_AWARENESS, False),
+        (MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL, False),
+        (MultiAgentAwarenessCondition.PLANNER_ESTIMATED, True),  # True = needs planner
     ]
 
     results = []
@@ -431,15 +454,27 @@ async def main():
         desc = problem["question_content"][:200]
         print(f"\nProblem (first 200 chars):\n{desc}...")
 
-        for condition in conditions_to_test:
+        # Get planner estimate once per problem (reused for PLANNER_ESTIMATED condition)
+        print("\n--- Getting planner estimate ---")
+        planner_est = await estimate_budget(problem["question_content"])
+        print(
+            f"Planner estimate: {planner_est.estimated_tokens_per_iteration} tokens, {planner_est.estimated_iterations} iterations"
+        )
+        print(f"Reasoning: {planner_est.reasoning}")
+
+        for condition, needs_planner in conditions_to_test:
             print("\n" + "-" * 60)
             print(f"CONDITION: {condition.value}")
             print("-" * 60)
+
+            # Pass planner estimate only for PLANNER_ESTIMATED condition
+            planner_dict = planner_est.to_dict() if needs_planner else None
 
             result = await run_diagnostic_trial(
                 problem=problem,
                 awareness_condition=condition,
                 max_iterations=3,
+                planner_estimate=planner_dict,
             )
 
             results.append(
@@ -447,6 +482,12 @@ async def main():
                     "condition": condition.value,
                     "problem": problem["question_title"],
                     "difficulty": problem["difficulty"],
+                    "planner_tokens": planner_est.estimated_tokens_per_iteration
+                    if needs_planner
+                    else None,
+                    "planner_iterations": planner_est.estimated_iterations
+                    if needs_planner
+                    else None,
                     **result,
                 }
             )
@@ -471,9 +512,9 @@ async def main():
             f"{r['problem'][:33]:<35} {r['condition']:<25} {success_str:<10} {r['iterations']:<6} {r['coder_tokens']:<10}"
         )
 
-    # Group by problem for paired comparison
+    # Group by problem for comparison across all 3 conditions
     print("\n" + "-" * 60)
-    print("PAIRED COMPARISON:")
+    print("THREE-WAY COMPARISON:")
     print("-" * 60)
 
     from collections import defaultdict
@@ -484,21 +525,39 @@ async def main():
 
     for prob, conditions in by_problem.items():
         unaware = conditions.get("no_awareness", {})
-        aware = conditions.get("overall_and_individual", {})
+        fixed = conditions.get("overall_and_individual", {})
+        planner = conditions.get("planner_estimated", {})
 
-        if unaware and aware:
+        print(f"\n{prob[:50]}:")
+
+        if unaware:
             u_result = "✓" if unaware.get("success") else "✗"
-            a_result = "✓" if aware.get("success") else "✗"
-            token_diff = aware.get("coder_tokens", 0) - unaware.get("coder_tokens", 0)
+            print(
+                f"  NO_AWARENESS (baseline):    {u_result} ({unaware.get('iterations')} iter, {unaware.get('coder_tokens')} tok)"
+            )
 
-            print(f"\n{prob[:50]}:")
+        if fixed:
+            f_result = "✓" if fixed.get("success") else "✗"
             print(
-                f"  Unaware: {u_result} ({unaware.get('iterations')} iter, {unaware.get('coder_tokens')} tok)"
+                f"  FIXED (3000 tok):           {f_result} ({fixed.get('iterations')} iter, {fixed.get('coder_tokens')} tok)"
             )
+
+        if planner:
+            p_result = "✓" if planner.get("success") else "✗"
+            est_tok = planner.get("planner_tokens", "?")
             print(
-                f"  Aware:   {a_result} ({aware.get('iterations')} iter, {aware.get('coder_tokens')} tok)"
+                f"  PLANNER ({est_tok} tok est):   {p_result} ({planner.get('iterations')} iter, {planner.get('coder_tokens')} tok)"
             )
-            print(f"  Token diff: {token_diff:+d}")
+
+        # Token comparisons
+        if fixed and unaware:
+            diff_fixed = fixed.get("coder_tokens", 0) - unaware.get("coder_tokens", 0)
+            print(f"  Token diff (fixed vs baseline): {diff_fixed:+d}")
+        if planner and unaware:
+            diff_planner = planner.get("coder_tokens", 0) - unaware.get(
+                "coder_tokens", 0
+            )
+            print(f"  Token diff (planner vs baseline): {diff_planner:+d}")
 
     # Check for issues
     print("\n" + "-" * 40)

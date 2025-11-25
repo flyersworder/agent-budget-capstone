@@ -15,6 +15,7 @@ from .core import (
 )
 from .loop_agents import CheckApprovalAgent
 from .monitor import AgentMetrics, MultiAgentMetrics, ToolUsageMetrics, UsageMonitor
+from .planner import PlannerEstimate, estimate_budget
 
 __version__ = "0.1.0"
 
@@ -30,4 +31,7 @@ __all__ = [
     "MultiAgentMetrics",
     "ToolUsageMetrics",
     "UsageMonitor",
+    # Part 2 Extension: Planner
+    "PlannerEstimate",
+    "estimate_budget",
 ]

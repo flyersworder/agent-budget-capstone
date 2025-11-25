@@ -771,6 +771,7 @@ class AgentFactory:
         awareness_condition: MultiAgentAwarenessCondition = MultiAgentAwarenessCondition.NO_AWARENESS,
         max_iterations: int = 3,
         difficulty: str = "medium",
+        planner_estimate: dict[str, Any] | None = None,
     ) -> TrackingLoopAgent:
         """Create code review team for iterative Coder-Reviewer workflow.
 
@@ -786,6 +787,8 @@ class AgentFactory:
             awareness_condition: Budget awareness level
             max_iterations: Maximum iterations (default: 3)
             difficulty: Problem difficulty ("easy" or "medium") for budget scaling
+            planner_estimate: Optional dict with planner estimates for PLANNER_ESTIMATED
+                Expected keys: estimated_tokens_per_iteration, estimated_iterations
 
         Returns:
             TrackingLoopAgent with Coder, Reviewer, and CheckApproval agents
@@ -800,12 +803,14 @@ class AgentFactory:
             max_iterations,
             agent_role="Coder",
             difficulty=difficulty,
+            planner_estimate=planner_estimate,
         )
         reviewer_budget_message = generate_budget_message(
             awareness_condition,
             max_iterations,
             agent_role="Reviewer",
             difficulty=difficulty,
+            planner_estimate=planner_estimate,
         )
 
         # Create Coder agent

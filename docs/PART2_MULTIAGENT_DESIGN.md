@@ -15,6 +15,8 @@
 
 The critical insight: Simply telling agents about budgets doesn't help. Telling them about **consequences** (truncation, task failure) does.
 
+**Extension (Planned)**: Testing whether dynamic, problem-specific budget estimates from a planner agent improve performance compared to fixed difficulty-based budgets.
+
 ## Background
 
 ### Part 1 Findings (Single-Agent)
@@ -39,10 +41,14 @@ We pivot from Q&A to code review because:
 
 | Factor | Levels |
 |--------|--------|
-| **Awareness** | NO_AWARENESS vs OVERALL_AND_INDIVIDUAL |
+| **Awareness** | NO_AWARENESS vs OVERALL_AND_INDIVIDUAL vs PLANNER_ESTIMATED |
 | **Difficulty** | Easy vs Medium |
 
-**Within-subjects design**: Each problem tested with BOTH conditions (140 total trials from 70 problems)
+**Within-subjects design**: Each problem tested with ALL conditions
+
+**Current study (completed)**: NO_AWARENESS vs OVERALL_AND_INDIVIDUAL (140 trials from 70 problems)
+
+**Extension study (planned)**: Add PLANNER_ESTIMATED condition (210 trials from 70 problems)
 
 ### Task: LiveCodeBench Code Generation
 
@@ -238,6 +244,79 @@ Be concise - the test result tells you everything you need to know.
 {standard reviewer instructions - same as NO_AWARENESS}
 ```
 
+## Part 2 Extension: Planner-Estimated Budgets
+
+### Research Question
+
+**Does dynamic, problem-specific budget estimation improve performance compared to fixed difficulty-based budgets?**
+
+### Motivation
+
+The main study established that consequence-aware framing works. But the budget numbers (2000/3000 tokens) are fixed by difficulty level. A natural question: would more accurate, problem-specific estimates help agents perform better?
+
+### Design
+
+Add a third condition that uses a **planner agent** to estimate budgets before the Coder-Reviewer team begins:
+
+| Condition | Token Budget | Iteration Estimate | Source |
+|-----------|-------------|-------------------|--------|
+| `NO_AWARENESS` | None shown | None shown | - |
+| `OVERALL_AND_INDIVIDUAL` | Fixed (2000/3000) | Fixed (3 max) | Difficulty-based |
+| `PLANNER_ESTIMATED` | Dynamic per-problem | Dynamic (1-3) | LLM planner |
+
+### Planner Implementation
+
+Single LLM call before each trial:
+- **Model**: Same as agents (Gemini 2.5 Flash Lite)
+- **Input**: Problem description
+- **Output**: Structured JSON with token estimate, iteration estimate, reasoning
+- **No thinking mode**: Simple classification task
+
+```python
+@dataclass
+class PlannerEstimate:
+    estimated_tokens_per_iteration: int  # e.g., 1800
+    estimated_iterations: int            # e.g., 2
+    reasoning: str                       # e.g., "Medium complexity DP problem"
+```
+
+### Prompt Comparison
+
+**OVERALL_AND_INDIVIDUAL (Fixed)**:
+```
+[RESOURCE CONSTRAINTS]
+- 3000 tokens per iteration (output is cut off if exceeded)
+- 3 iterations maximum (task fails if all used without success)
+```
+
+**PLANNER_ESTIMATED (Dynamic)**:
+```
+[RESOURCE CONSTRAINTS - ESTIMATED FOR THIS PROBLEM]
+- 1800 tokens per iteration (output is cut off if exceeded)
+- 2 iterations expected (task fails if 3 used without success)
+```
+
+Key difference: Only the **numbers** change. The consequence framing is identical.
+
+### Hypothesis
+
+If the planner provides more calibrated estimates (tighter for simple problems, looser for complex ones), agents may:
+1. Be more efficient on simple problems (tighter budgets create urgency)
+2. Have more headroom on complex problems (avoid unnecessary truncation)
+
+Alternatively, fixed budgets may be equally effective if:
+- Planner estimates are not significantly more accurate
+- Agents don't respond differently to varied vs fixed numbers
+
+### Files
+
+- **Planner module**: `agent_budget/planner.py`
+- **Prompt generation**: `agent_budget/code_review_prompts.py` (updated for PLANNER_ESTIMATED)
+- **Agent factory**: `agent_budget/agent_factory.py` (accepts planner_estimate parameter)
+- **Diagnostic tests**: `tests/test_planner.py`, `tests/test_planner_integration.py`, `tests/test_code_review_diagnostic.py`
+
+---
+
 ## Technical Implementation
 
 ### Budget Configuration
@@ -293,11 +372,17 @@ async for event in runner.run_async(...):
 
 ## Files
 
+### Main Study
 - **Study runner**: `experiments/part2_multi_agent/run_code_review_study.py`
 - **Analysis script**: `experiments/part2_multi_agent/analyze_code_review_study.py`
 - **Results**: `experiments/results/part2_code_review/`
 - **Prompts**: `agent_budget/code_review_prompts.py`
 - **Comprehensive report**: `docs/PART2_COMPREHENSIVE_REPORT.md`
+
+### Planner Extension
+- **Planner module**: `agent_budget/planner.py`
+- **Planner tests**: `tests/test_planner.py`, `tests/test_planner_integration.py`
+- **Diagnostic test (all 3 conditions)**: `tests/test_code_review_diagnostic.py`
 
 ## References
 

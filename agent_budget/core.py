@@ -73,6 +73,8 @@ class MultiAgentAwarenessCondition(Enum):
     RESERVE_AWARENESS = (
         "reserve_awareness"  # Know total + own allocation + reserve pool
     )
+    # Part 2 Extension: Planner-estimated budgets
+    PLANNER_ESTIMATED = "planner_estimated"  # Use planner's problem-specific estimates
 
 
 @dataclass
