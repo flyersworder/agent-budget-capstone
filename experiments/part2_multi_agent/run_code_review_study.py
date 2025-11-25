@@ -1,23 +1,23 @@
-"""Part 2: Code Review Pilot Study - Budget Awareness in Multi-Agent Teams.
+"""Part 2: Code Review Study - Budget Awareness in Multi-Agent Teams.
 
 Tests how budget awareness affects Coder-Reviewer team performance on
 LiveCodeBench problems.
 
 Design (WITHIN-SUBJECTS):
 - 2 awareness conditions: NO_AWARENESS vs OVERALL_AND_INDIVIDUAL
-- 2 difficulty levels: MEDIUM vs HARD
-- 20 unique problems per difficulty level = 40 unique problems
-- Each problem tested with BOTH conditions = 80 total trials
+- 2 difficulty levels: EASY vs MEDIUM
+- All available problems from LiveCodeBench (31 easy + 39 medium = 70)
+- Each problem tested with BOTH conditions = 140 total trials
 - Within-subjects allows paired comparisons for more statistical power
 
 Sample size rationale:
-- 20 problems per difficulty × 2 conditions = 40 paired comparisons per difficulty
+- 70 problems × 2 conditions = 140 trials total
 - Paired design increases power vs between-subjects
 - Bootstrap with 10,000 resamples provides stable CIs
 - McNemar's test for paired binary outcomes
 
 Usage:
-    python -m experiments.part2_multi_agent.run_code_review_pilot
+    python -m experiments.part2_multi_agent.run_code_review_study
 """
 
 import asyncio
@@ -37,11 +37,12 @@ from agent_budget.core import MultiAgentAwarenessCondition
 
 
 @dataclass
-class PilotConfig:
-    """Configuration for pilot study."""
+class StudyConfig:
+    """Configuration for code review study."""
 
     # Sample sizes (within-subjects: each problem tested with both conditions)
-    problems_per_difficulty: int = 20  # 20 medium + 20 hard = 40 unique problems
+    # Set high to use all available problems (31 easy + 39 medium = 70 problems)
+    problems_per_difficulty: int = 100  # Will cap at available
 
     # Conditions
     awareness_conditions: list[str] = field(
@@ -58,8 +59,8 @@ class PilotConfig:
 
 
 @dataclass
-class PilotResults:
-    """Results from pilot study."""
+class StudyResults:
+    """Results from code review study."""
 
     config: dict[str, Any]
     trials: list[dict[str, Any]]
@@ -72,7 +73,7 @@ class PilotResults:
     failed_trials: int = 0
 
 
-def load_problems(config: PilotConfig) -> dict[str, list[dict[str, Any]]]:
+def load_problems(config: StudyConfig) -> dict[str, list[dict[str, Any]]]:
     """Load and stratify LiveCodeBench problems.
 
     Returns:
@@ -112,9 +113,9 @@ def load_problems(config: PilotConfig) -> dict[str, list[dict[str, Any]]]:
 
 
 def select_problems(
-    problems_by_difficulty: dict[str, list[dict[str, Any]]], config: PilotConfig
+    problems_by_difficulty: dict[str, list[dict[str, Any]]], config: StudyConfig
 ) -> list[tuple[dict[str, Any], str]]:
-    """Select problems for the pilot with stratified sampling.
+    """Select problems for the study with stratified sampling.
 
     Within-subjects design: selects N unique problems per difficulty.
     Each problem will be tested with both conditions.
@@ -145,20 +146,20 @@ def select_problems(
     return selected
 
 
-async def run_pilot(config: PilotConfig | None = None) -> PilotResults:
-    """Run the pilot study.
+async def run_study(config: StudyConfig | None = None) -> StudyResults:
+    """Run the code review study.
 
     Args:
-        config: Pilot configuration (uses defaults if None)
+        config: Study configuration (uses defaults if None)
 
     Returns:
-        PilotResults with all trial data
+        StudyResults with all trial data
     """
     if config is None:
-        config = PilotConfig()
+        config = StudyConfig()
 
     print("=" * 80)
-    print("PART 2 CODE REVIEW PILOT STUDY (WITHIN-SUBJECTS)")
+    print("PART 2 CODE REVIEW STUDY (WITHIN-SUBJECTS)")
     print("=" * 80)
     print()
     print("Configuration:")
@@ -181,7 +182,7 @@ async def run_pilot(config: PilotConfig | None = None) -> PilotResults:
     print(f"\nSelected {len(selected_problems)} unique problems")
 
     # Initialize results
-    results = PilotResults(
+    results = StudyResults(
         config=asdict(config),
         trials=[],
         started_at=datetime.now().isoformat(),
@@ -321,22 +322,22 @@ async def run_pilot(config: PilotConfig | None = None) -> PilotResults:
     return results
 
 
-def save_results(results: PilotResults, intermediate: bool = False) -> Path:
+def save_results(results: StudyResults, intermediate: bool = False) -> Path:
     """Save results to JSON file.
 
     Args:
-        results: Pilot results to save
+        results: Study results to save
         intermediate: If True, saves as intermediate checkpoint
 
     Returns:
         Path to saved file
     """
-    output_dir = Path("experiments/results/part2_code_review_pilot")
+    output_dir = Path("experiments/results/part2_code_review")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     suffix = "_intermediate" if intermediate else ""
-    output_file = output_dir / f"pilot_{timestamp}{suffix}.json"
+    output_file = output_dir / f"study_{timestamp}{suffix}.json"
 
     # Convert to serializable dict
     data = {
@@ -355,10 +356,10 @@ def save_results(results: PilotResults, intermediate: bool = False) -> Path:
     return output_file
 
 
-def print_summary(results: PilotResults) -> None:
-    """Print summary of pilot results."""
+def print_summary(results: StudyResults) -> None:
+    """Print summary of study results."""
     print("\n" + "=" * 80)
-    print("PILOT STUDY SUMMARY")
+    print("STUDY SUMMARY")
     print("=" * 80)
 
     print(f"\nTotal trials: {results.total_trials}")
@@ -467,22 +468,21 @@ async def main() -> None:
             seed = int(sys.argv[idx + 1])
             print(f"Using custom seed: {seed}")
 
-    config = PilotConfig(
-        problems_per_difficulty=20,  # 20 easy + 20 medium = 40 problems × 2 conditions = 80 trials
+    config = StudyConfig(
+        # Uses all available problems (31 easy + 39 medium = 70 × 2 conditions = 140 trials)
         random_seed=seed,
     )
 
-    results = await run_pilot(config)
+    results = await run_study(config)
     print_summary(results)
     save_results(results)
 
     print("\n" + "=" * 80)
-    print("PILOT STUDY COMPLETE")
+    print("STUDY COMPLETE")
     print("=" * 80)
     print("\nNext steps:")
-    print("  1. Run: python -m experiments.part2_multi_agent.analyze_code_review_pilot")
+    print("  1. Run: python -m experiments.part2_multi_agent.analyze_code_review_study")
     print("  2. Review paired comparisons and bootstrap CIs")
-    print("  3. Decide on full study parameters")
 
 
 if __name__ == "__main__":

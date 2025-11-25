@@ -1,4 +1,4 @@
-"""Analysis of Part 2 Code Review Pilot with Bootstrap Confidence Intervals.
+"""Analysis of Part 2 Code Review Study with Bootstrap Confidence Intervals.
 
 Provides statistical analysis including:
 1. Success rates by condition and difficulty
@@ -11,7 +11,7 @@ Provides statistical analysis including:
 8. Direction of effect assessment
 
 Usage:
-    python -m experiments.part2_multi_agent.analyze_code_review_pilot
+    python -m experiments.part2_multi_agent.analyze_code_review_study
 """
 
 import json
@@ -23,25 +23,33 @@ import numpy as np
 
 
 def load_latest_results() -> dict[str, Any]:
-    """Load the most recent pilot results."""
-    results_dir = Path("experiments/results/part2_code_review_pilot")
+    """Load the most recent study results."""
+    results_dir = Path("experiments/results/part2_code_review")
+
+    # Fall back to pilot directory if new one doesn't exist yet
+    if not results_dir.exists():
+        results_dir = Path("experiments/results/part2_code_review_pilot")
 
     if not results_dir.exists():
         raise FileNotFoundError(f"Results directory not found: {results_dir}")
 
-    # Find non-intermediate files
+    # Find non-intermediate files (check both study_ and pilot_ prefixes)
+    study_files = sorted(
+        [f for f in results_dir.glob("study_*.json") if "intermediate" not in f.name]
+    )
     pilot_files = sorted(
         [f for f in results_dir.glob("pilot_*.json") if "intermediate" not in f.name]
     )
+    result_files = study_files + pilot_files
 
-    if not pilot_files:
+    if not result_files:
         # Fall back to intermediate if no final
-        pilot_files = sorted(results_dir.glob("pilot_*.json"))
+        result_files = sorted(results_dir.glob("*.json"))
 
-    if not pilot_files:
-        raise FileNotFoundError("No pilot results found")
+    if not result_files:
+        raise FileNotFoundError("No study results found")
 
-    latest_file = pilot_files[-1]
+    latest_file = result_files[-1]
     print(f"Loading: {latest_file.name}\n")
 
     with open(latest_file) as f:
