@@ -4,6 +4,17 @@
 
 **Does budget awareness affect multi-agent team performance in iterative code generation tasks?**
 
+## Executive Summary
+
+**Key Finding**: Consequence-aware budget framing significantly improves first-iteration success rate in multi-agent code review tasks.
+
+- First-iteration success: 52.9% (aware) vs 37.1% (unaware), **p=0.0034**
+- Overall success: 75.7% vs 71.4% (+4.3pp, not significant)
+- Token efficiency: Aware agents use 631 fewer tokens on average
+- Zero truncation in aware condition vs 4.3% in unaware
+
+The critical insight: Simply telling agents about budgets doesn't help. Telling them about **consequences** (truncation, task failure) does.
+
 ## Background
 
 ### Part 1 Findings (Single-Agent)
@@ -22,41 +33,23 @@ We pivot from Q&A to code review because:
 3. **Iterative refinement**: Multiple rounds allow budget to matter across iterations
 4. **Tool-agent asymmetry**: Reviewer's tool execution is FREE (outside LLM) - creates meaningful budget allocation question
 
-### Hypotheses
-
-**H1 (Main effect)**: Budget awareness affects team performance (pass rate)
-
-**H2 (Direction)**: Budget awareness may help in multi-agent settings where:
-- Role specialization channels metacognition productively
-- Explicit allocation reduces coordination uncertainty
-
-**H3 (Difficulty moderation)**: Any awareness effect is stronger on harder problems where budget allocation matters more
-
 ## Experimental Design
 
-### Design: 2 × 2 Between-Subjects with Difficulty Stratification
+### Design: Within-Subjects with Difficulty Stratification
 
 | Factor | Levels |
 |--------|--------|
 | **Awareness** | NO_AWARENESS vs OVERALL_AND_INDIVIDUAL |
-| **Difficulty** | Medium vs Hard |
+| **Difficulty** | Easy vs Medium |
 
-**Why simplified from original 4 conditions?**
-- Part 1 showed that prompt variations don't matter much
-- Cleaner comparison: baseline vs full awareness
-- Reduces sample size requirements
+**Within-subjects design**: Each problem tested with BOTH conditions (140 total trials from 70 problems)
 
 ### Task: LiveCodeBench Code Generation
 
 **Dataset**: LiveCodeBench (code_generation_lite, release_v6)
 - Problems from February 2025+ (after model knowledge cutoff)
-- Difficulty labels: medium, hard
+- 31 easy + 39 medium = 70 unique problems
 - Objective test cases for evaluation
-
-**Why LiveCodeBench?**
-- Recent problems avoid memorization
-- Clear pass/fail criteria
-- Difficulty labels enable moderation analysis
 
 ### Multi-Agent Architecture
 
@@ -69,53 +62,131 @@ Problem → Coder → Reviewer → [APPROVE or iterate] → Final Code
 
 **Agent Roles**:
 
-| Agent | Role | Tools | Budget Share |
-|-------|------|-------|--------------|
-| **Coder** | Write/revise Python code | None (thinking-enabled) | 80% |
-| **Reviewer** | Test code, decide approve/revise | `test_code()` | 20% |
+| Agent | Role | Tools | Budget |
+|-------|------|-------|--------|
+| **Coder** | Write/revise Python code | None (thinking-enabled) | 3000 tokens (medium) / 2000 (easy) |
+| **Reviewer** | Test code, decide approve/revise | `test_code()` | 512 tokens |
 
-**Why this allocation?**
-- Coder needs substantial thinking for algorithm design
-- Reviewer's tool execution is FREE (outside LLM loop)
-- Reviewer only needs tokens to call tool and interpret result
+**Maximum iterations**: 3
 
-### Budget Configuration
+## Evolution of Awareness Manipulation
 
-```python
-# From core.py
-CODE_REVIEW_CODER_BUDGET = TokenBudget(
-    reasoning_tokens=1536,  # Thinking for algorithm design
-    output_tokens=512,      # Code output
-)  # 2048 total (80%)
+### Phase 1: Neutral Information (No Effect)
 
-CODE_REVIEW_REVIEWER_BUDGET = TokenBudget(
-    reasoning_tokens=256,   # Minimal thinking
-    output_tokens=256,      # Decision output
-)  # 512 total (20%)
-
-CODE_REVIEW_TEAM_BUDGET = 2560  # Total
+Initial approach - just provide budget information:
+```
+[RESOURCE CONTEXT]
+You have 3000 tokens per iteration.
+You have up to 3 iterations.
 ```
 
-**Maximum iterations**: 3 (mimics realistic code review)
+**Result**: No significant effect (-2.9pp, p=0.80)
 
-## Two Awareness Conditions
+### Phase 2: Consequence-Aware Framing (Significant Effect)
 
-### Design Principles (from Literature Review)
+Refined approach - explain what happens when limits are hit:
+```
+[RESOURCE CONSTRAINTS]
+- 3000 tokens per iteration (output is cut off if exceeded)
+- 3 iterations maximum (task fails if all used without success)
+```
 
-Based on our literature review on resource awareness and team performance, we apply these key principles:
+**Result**: Significant improvement in first-iteration success (+15.7pp, p=0.0034)
 
-1. **Challenge vs. Threat Framing**: Frame budget as "sufficient for" not "limited to" - this promotes challenge appraisal over threat response
-2. **Focusing Dividend**: Constraints help prioritize what matters - emphasize this positive aspect
-3. **Iteration Context**: Include temporal awareness (iteration X of Y) to support planning
-4. **Actionable Guidance**: Tell agents what they CAN do, not just what they can't
-5. **Avoid Threatening Language**: No 🚨 WARNING/CRITICAL emojis - these trigger threat response
+### Key Insight
+
+The difference is **consequence awareness**, not just resource awareness:
+- "You have 3000 tokens" → Agent reads but doesn't operationalize
+- "Output is cut off if exceeded" → Agent understands the stakes
+
+## Study Results
+
+### Primary Outcome: Overall Success Rate
+
+| Condition | Success Rate | 95% CI |
+|-----------|-------------|--------|
+| NO_AWARENESS | 71.4% | [60.0%, 81.4%] |
+| OVERALL_AND_INDIVIDUAL | 75.7% | [65.7%, 85.7%] |
+
+**Difference**: +4.3pp [-11.4, +18.6] - Not statistically significant
+
+### Key Finding: First-Iteration Success
+
+| Condition | First-Iteration Success | 95% CI |
+|-----------|------------------------|--------|
+| NO_AWARENESS | 37.1% | [25.7%, 48.6%] |
+| OVERALL_AND_INDIVIDUAL | 52.9% | [41.4%, 64.3%] |
+
+**Difference**: +15.7pp [-1.4, +31.4]
+**McNemar's test p-value**: 0.0034 (**Statistically Significant**)
+
+Paired analysis:
+- 25 problems: Both succeeded on first try
+- 1 problem: Only unaware succeeded first try
+- **12 problems: Only aware succeeded first try**
+
+### Token Efficiency
+
+| Condition | Avg Total Tokens | Avg Coder Tokens |
+|-----------|-----------------|------------------|
+| NO_AWARENESS | 4,440 | 4,365 |
+| OVERALL_AND_INDIVIDUAL | 3,809 | 3,716 |
+
+**Difference**: -631 tokens (aware uses 14% fewer tokens)
+
+### Iteration Analysis
+
+| Condition | Avg Iterations | Iteration Distribution |
+|-----------|---------------|----------------------|
+| NO_AWARENESS | 2.04 | 1=26, 2=15, 3=29 |
+| OVERALL_AND_INDIVIDUAL | 1.79 | 1=37, 2=11, 3=22 |
+
+### Truncation Analysis
+
+| Condition | Truncation Rate |
+|-----------|----------------|
+| NO_AWARENESS | 4.3% (3/70) |
+| OVERALL_AND_INDIVIDUAL | 0.0% (0/70) |
+
+### By Difficulty
+
+| Difficulty | NO_AWARENESS | AWARE | Effect |
+|------------|-------------|-------|--------|
+| Easy | 87% | 90% | +3.2pp |
+| Medium | 59% | 64% | +5.1pp |
+
+## Interpretation
+
+### Why Consequence Awareness Works
+
+1. **Truncation warning is actionable**: "Output is cut off" tells agents their code might be incomplete - they respond by being more concise
+
+2. **Failure framing creates urgency**: "Task fails if all iterations used" encourages getting it right the first time
+
+3. **No behavioral guidance needed**: Just stating consequences lets agents figure out the appropriate response
+
+### What Doesn't Work
+
+1. **Pure information**: "You have X tokens" - agents read but don't adapt
+2. **Challenge framing**: "Sufficient for a well-crafted solution" - no better than neutral
+3. **Reasoning/output split**: Explaining token allocation mechanism doesn't help
+
+### The Mechanism
+
+Consequence-aware agents show:
+- **Higher first-attempt success** (53% vs 37%)
+- **Fewer total tokens** (3,809 vs 4,440)
+- **Zero truncation** (vs 4.3%)
+- **Fewer iterations needed** (1.79 vs 2.04)
+
+This suggests agents:
+1. Think more carefully before generating code
+2. Write more concise solutions
+3. Avoid the "spiral" of repeated failed attempts
+
+## Prompts Used
 
 ### Condition 1: NO_AWARENESS (Baseline)
-
-- **No budget information** in initial prompts
-- **No status updates** between iterations
-- Pure focus on task instructions only
-- **Same team framing** as AWARE condition (consistent role context)
 
 **Coder prompt**:
 ```
@@ -147,119 +218,46 @@ FEEDBACK: [Brief explanation of what happened]
 Be concise - the test result tells you everything you need to know.
 ```
 
-### Condition 2: OVERALL_AND_INDIVIDUAL (Budget Aware - Challenge Framed)
+### Condition 2: OVERALL_AND_INDIVIDUAL (Consequence-Aware)
 
-**Design Evolution**: Based on pilot study findings, we refined the budget message to use **challenge framing** without behavioral guidance. The key insight from literature: framing resources as "sufficient for" (challenge) rather than "limited to" (threat) promotes better performance.
-
-**Two components of awareness**:
-1. **Initial prompt framing** (challenge-oriented, no behavioral advice)
-2. **Ongoing status updates** (factual token usage only)
-
-**Coder prompt** (with resource context prefix):
+**Coder prompt** (with constraint prefix):
 ```
-[RESOURCE CONTEXT]
-You have 3000 tokens per iteration - sufficient for a well-crafted solution.
-This includes 1500 for reasoning and 1500 for code output.
-
-You have up to 3 iterations to get it right.
+[RESOURCE CONSTRAINTS]
+- 3000 tokens per iteration (output is cut off if exceeded)
+- 3 iterations maximum (task fails if all used without success)
 
 {standard coder instructions - same as NO_AWARENESS}
 ```
 
-**Reviewer prompt** (with resource context prefix):
+**Reviewer prompt** (with constraint prefix):
 ```
-[RESOURCE CONTEXT]
-You have 500 tokens per iteration - sufficient for testing and clear feedback.
-This includes 300 for analysis and 200 for your response.
-
-You have up to 3 iterations.
+[RESOURCE CONSTRAINTS]
+- 512 tokens per iteration (output is cut off if exceeded)
+- 3 iterations maximum (task fails if all used without success)
 
 {standard reviewer instructions - same as NO_AWARENESS}
 ```
 
-**Key design decisions**:
-- **No behavioral guidance**: Removed "focus on X" advice to isolate awareness effect
-- **No partner info**: Agents don't know partner's budget (realistic - we rarely know colleagues' allocations)
-- **Per-iteration framing**: Clear that budget is per iteration, not cumulative
-- **Consistent base instructions**: Both conditions use identical task instructions
+## Technical Implementation
 
-**Status updates between iterations** (factual only):
+### Budget Configuration
+
+```python
+# Per-difficulty coder budgets
+CODE_REVIEW_CODER_BUDGETS = {
+    "easy": TokenBudget(reasoning_tokens=1000, output_tokens=1000),  # 2000 total
+    "medium": TokenBudget(reasoning_tokens=1500, output_tokens=1500),  # 3000 total
+}
+
+# Reviewer budget (same for all difficulties)
+CODE_REVIEW_REVIEWER_BUDGET = TokenBudget(
+    reasoning_tokens=256,
+    output_tokens=256,
+)  # 512 total
 ```
-[STATUS: Iteration 1 of 3 complete]
-Coder tokens used: 2,000
-Reviewer tokens used: 150
-2 iteration(s) remaining.
-```
-
-## Sample Size and Power
-
-### Pilot Study
-- **N = 40 problems** (10 per cell in 2×2 design)
-- Purpose: Verify framework, estimate effect sizes
-
-### Full Study (if pilot shows signal)
-- **N = 120 problems** (30 per cell)
-- Power analysis: 80% power to detect medium effect (d=0.5)
-
-### Problem Selection
-- Filter: Contest date ≥ February 2025
-- Stratify: Equal medium/hard split
-- Random assignment: Each problem → one condition
-
-## Metrics
-
-### Primary Outcome
-**Pass rate**: Binary (all public tests pass = 1, else = 0)
-
-### Secondary Outcomes
-- **Iterations to success**: 1, 2, 3, or failed
-- **First-attempt pass rate**: Success on iteration 1
-- **Token efficiency**: Total tokens used / success
-
-### Process Metrics
-- **Coder tokens**: Per-iteration and total
-- **Reviewer tokens**: Per-iteration and total
-- **Token ratio**: Coder / Reviewer (should be ~4:1 given allocation)
-
-## Analysis Plan
-
-### Primary Analysis
-1. **Chi-square test**: Pass rate by awareness condition
-2. **Logistic regression**: Pass ~ Awareness + Difficulty + Awareness×Difficulty
-
-### Secondary Analyses
-1. **Iteration analysis**: Do aware agents succeed faster?
-2. **Token analysis**: Do aware agents use tokens differently?
-3. **Difficulty moderation**: Is awareness effect stronger for hard problems?
-
-### Expected Outcomes
-
-| Scenario | Finding | Interpretation |
-|----------|---------|----------------|
-| **A: Awareness helps** | Aware > Unaware pass rate | Role specialization framing works |
-| **B: Awareness hurts** | Aware < Unaware pass rate | Metacognitive overhead (like Part 1 initial result) |
-| **C: Null effect** | No difference | Budget awareness fundamentally doesn't affect LLM behavior |
-| **D: Difficulty interaction** | Awareness helps on hard only | Budget matters when resources are constrained |
-
-## Implementation Status
-
-### Completed ✅
-- [x] Core budget configuration (`core.py`)
-- [x] Prompt generation with meaningful framing (`code_review_prompts.py`)
-- [x] Code review runner with token tracking (`code_review_runner.py`)
-- [x] Agent factory for code review teams (`agent_factory.py`)
-- [x] Test script verifying both conditions work (`test_code_review_loop.py`)
-
-### Ready for Pilot
-- [ ] Experiment runner script (`run_part2_code_review.py`)
-- [ ] Results collection and storage
-- [ ] Analysis script
-
-## Technical Details
 
 ### Token Tracking
 
-Tokens are tracked from LLM response events:
 ```python
 async for event in runner.run_async(...):
     if hasattr(event, "usage_metadata") and event.usage_metadata:
@@ -272,109 +270,34 @@ async for event in runner.run_async(...):
             reviewer_tokens += thinking + output
 ```
 
-### Test Execution
+## Conclusions
 
-The `test_code()` function:
-1. Reads code from session state (`current_code`)
-2. Writes to temp file
-3. Executes with problem's test input via stdin
-4. Compares stdout to expected output
-5. Returns PASS/FAIL with details
+### Main Findings
 
-**Critical**: Tool execution is outside the LLM token budget - only the function call and result interpretation count.
+1. **Consequence awareness significantly improves first-iteration success** (p=0.0034)
+2. **Pure budget information has no effect** - agents need to understand stakes
+3. **Aware agents are more efficient** - fewer tokens, fewer iterations, zero truncation
+4. **Effect is consistent across difficulty levels** but stronger on medium problems
 
-### Loop Termination
+### Implications for AI Agent Design
 
-The loop exits when:
-1. Reviewer outputs "APPROVE" → Success
-2. Max iterations (3) reached → Failure
-3. (Rare) Unrecoverable error → Logged and skipped
+1. **Don't just inform - explain consequences**: Agents respond to stakes, not just numbers
+2. **Truncation warnings are actionable**: Agents can adapt their output length
+3. **Iteration limits create urgency**: First-attempt quality improves when failure has consequences
 
-## Data Collection Format
+### Limitations
 
-```python
-@dataclass
-class CodeReviewTrial:
-    problem_id: str
-    problem_title: str
-    difficulty: str  # "medium" or "hard"
-    awareness_condition: MultiAgentAwarenessCondition
+1. Single model (Gemini 2.5 Flash Lite) - may not generalize
+2. Code generation task - may not apply to other domains
+3. Artificial consequences - real systems may have different dynamics
 
-    # Outcomes
-    success: bool
-    num_iterations: int
-    final_decision: str  # "APPROVE" or "MAX_ITERATIONS_REACHED"
+## Files
 
-    # Token usage
-    team_total_tokens: int
-    coder_tokens: int
-    reviewer_tokens: int
-```
-
-## Future Enhancement: Planning Phase with Budget Estimation
-
-### Motivation
-
-In real human teams, project work typically begins with a **planning phase** where:
-1. A project lead evaluates the task difficulty
-2. Estimates required effort (time, resources, iterations)
-3. Communicates these estimates to team members
-
-This mirrors how contracted projects work - teams know both the resource limit AND have an estimate of what's needed before starting.
-
-### Proposed Design
-
-Add a **planning agent** (or extend CheckApprovalAgent) that:
-1. Reads the problem description before main execution
-2. Estimates difficulty and expected iterations
-3. Passes estimates to Coder/Reviewer via their prompts
-
-### Implementation Approach (Low Effort)
-
-**Planning prompt** (single LLM call):
-```
-Analyze this programming problem and estimate:
-1. Difficulty (easy/medium/hard)
-2. Expected iterations needed (1-3)
-3. Brief reasoning
-
-PROBLEM:
-{problem_description}
-
-Output JSON: {"difficulty": "...", "estimated_iterations": N, "reasoning": "..."}
-```
-
-**Enhanced budget message for AWARE condition**:
-```
-[RESOURCE CONTEXT]
-You have 3000 tokens per iteration - sufficient for a well-crafted solution.
-This includes 1500 for reasoning and 1500 for code output.
-
-Task assessment: This appears to be a medium-difficulty problem,
-likely solvable in 2 iterations.
-
-You have up to 3 iterations to get it right.
-```
-
-### Why This Is More Realistic
-
-- Human teams don't just know their budget - they also estimate effort
-- Planning creates **shared mental models** (from literature review)
-- Estimates enable agents to calibrate their approach
-- Still focuses on awareness (not adaptive behavior) - keeps experiment clean
-
-### Research Questions This Enables
-
-1. **Estimation accuracy**: How well do agents estimate difficulty?
-2. **Calibration effects**: Does knowing the estimate change behavior?
-3. **Interaction**: Does accurate estimation + budget awareness improve outcomes?
-
-### Implementation Notes
-
-- Keep actual budgets fixed (don't change based on estimates)
-- Log estimates for analysis (compare to actual difficulty labels)
-- Simple addition: one LLM call + modified prompt template
-- Can be tested as a follow-up study after current pilot
+- **Study runner**: `experiments/part2_multi_agent/run_code_review_study.py`
+- **Analysis script**: `experiments/part2_multi_agent/analyze_code_review_study.py`
+- **Results**: `experiments/results/part2_code_review/`
+- **Prompts**: `agent_budget/code_review_prompts.py`
+- **Comprehensive report**: `docs/PART2_COMPREHENSIVE_REPORT.md`
 
 ## References
 

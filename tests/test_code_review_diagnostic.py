@@ -314,11 +314,68 @@ async def run_diagnostic_trial(
     }
 
 
+def show_prompt_comparison():
+    """Show prompts for both conditions to verify correctness."""
+    from agent_budget.code_review_prompts import (
+        generate_budget_message,
+        generate_coder_instruction,
+        generate_reviewer_instruction,
+    )
+
+    print("=" * 80)
+    print("PROMPT COMPARISON: NO_AWARENESS vs OVERALL_AND_INDIVIDUAL")
+    print("=" * 80)
+
+    sample_problem = "Write a function to find the maximum subarray sum."
+
+    for condition in [
+        MultiAgentAwarenessCondition.NO_AWARENESS,
+        MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL,
+    ]:
+        print(f"\n{'=' * 40}")
+        print(f"CONDITION: {condition.value}")
+        print("=" * 40)
+
+        # Generate budget messages
+        coder_budget_msg = generate_budget_message(
+            awareness_condition=condition,
+            max_iterations=3,
+            agent_role="Coder",
+            difficulty="medium",
+        )
+        reviewer_budget_msg = generate_budget_message(
+            awareness_condition=condition,
+            max_iterations=3,
+            agent_role="Reviewer",
+            difficulty="medium",
+        )
+
+        # Generate full instructions
+        coder_instruction = generate_coder_instruction(
+            problem_description=sample_problem,
+            budget_message=coder_budget_msg,
+        )
+        reviewer_instruction = generate_reviewer_instruction(
+            budget_message=reviewer_budget_msg,
+        )
+
+        print("\n--- CODER INSTRUCTION ---")
+        print(coder_instruction)
+
+        print("\n--- REVIEWER INSTRUCTION ---")
+        print(reviewer_instruction)
+
+    print("\n" + "=" * 80)
+
+
 async def main():
     """Run diagnostic tests on hard problems."""
 
-    print("=" * 80)
-    print("DIAGNOSTIC TEST: Code Review Loop on HARD Problems")
+    # First show prompt comparison
+    show_prompt_comparison()
+
+    print("\n" + "=" * 80)
+    print("DIAGNOSTIC TEST: Code Review Loop - BOTH CONDITIONS")
     print("=" * 80)
 
     # Load dataset
@@ -343,65 +400,112 @@ async def main():
         print(f"Found {len(probs)} {diff.upper()} problems after cutoff")
 
     # Select which difficulty to test (can be changed)
-    test_difficulty = os.environ.get("TEST_DIFFICULTY", "medium")
+    test_difficulty = os.environ.get("TEST_DIFFICULTY", "easy")
     test_problems = problems_by_diff.get(test_difficulty, [])
 
-    # Test first 2 problems with full diagnostics
-    num_to_test = min(2, len(test_problems))
-    print(
-        f"\nTesting {num_to_test} {test_difficulty.upper()} problems with full traceability...\n"
-    )
+    # Test multiple problems with BOTH conditions
+    if not test_problems:
+        print(f"No {test_difficulty} problems found!")
+        return
+
+    # Get a few different problems to test variety
+    num_problems = min(3, len(test_problems))
+    selected_problems = test_problems[:num_problems]
+
+    print(f"\nTesting {num_problems} problems with both conditions...")
+
+    conditions_to_test = [
+        MultiAgentAwarenessCondition.NO_AWARENESS,
+        MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL,
+    ]
 
     results = []
 
-    for i, problem in enumerate(test_problems[:num_to_test]):
+    for problem in selected_problems:
         print("\n" + "=" * 80)
-        print(f"PROBLEM {i + 1}/{num_to_test}: {problem['question_title']}")
-        print(f"Platform: {problem['platform']}")
+        print(f"PROBLEM: {problem['question_title']}")
         print(f"Difficulty: {problem['difficulty']}")
         print("=" * 80)
 
         # Show problem description (truncated)
-        desc = problem["question_content"][:500]
-        print(f"\nProblem description (first 500 chars):\n{desc}...")
+        desc = problem["question_content"][:200]
+        print(f"\nProblem (first 200 chars):\n{desc}...")
 
-        result = await run_diagnostic_trial(
-            problem=problem,
-            awareness_condition=MultiAgentAwarenessCondition.NO_AWARENESS,
-            max_iterations=3,
-        )
+        for condition in conditions_to_test:
+            print("\n" + "-" * 60)
+            print(f"CONDITION: {condition.value}")
+            print("-" * 60)
 
-        results.append(
-            {
-                "problem": problem["question_title"],
-                "difficulty": problem["difficulty"],
-                **result,
-            }
-        )
+            result = await run_diagnostic_trial(
+                problem=problem,
+                awareness_condition=condition,
+                max_iterations=3,
+            )
 
-        print("\n" + "-" * 60)
-        print("TRIAL SUMMARY:")
-        print("-" * 60)
-        print(f"  Success: {result['success']}")
-        print(f"  Iterations: {result['iterations']}")
-        print(f"  Coder tokens: {result['coder_tokens']}")
-        print(f"  Reviewer tokens: {result['reviewer_tokens']}")
-        print(f"  test_code() calls: {result['test_code_calls']}")
-        print(f"  Final decision: {result['final_decision'][:100]}")
+            results.append(
+                {
+                    "condition": condition.value,
+                    "problem": problem["question_title"],
+                    "difficulty": problem["difficulty"],
+                    **result,
+                }
+            )
 
-    # Final summary
+            print(f"\n  Result: {'✓ SUCCESS' if result['success'] else '✗ FAIL'}")
+            print(
+                f"  Iterations: {result['iterations']}, Coder tokens: {result['coder_tokens']}"
+            )
+
+    # Final comparison
     print("\n" + "=" * 80)
-    print("DIAGNOSTIC SUMMARY")
+    print("RESULTS SUMMARY")
     print("=" * 80)
 
+    print(
+        f"\n{'Problem':<35} {'Condition':<25} {'Success':<10} {'Iter':<6} {'Tokens':<10}"
+    )
+    print("-" * 90)
     for r in results:
-        print(f"\n{r['problem'][:50]}:")
-        print(f"  Success: {r['success']}")
+        success_str = "✓" if r["success"] else "✗"
         print(
-            f"  Iterations: {r['iterations']}, test_code calls: {r['test_code_calls']}"
+            f"{r['problem'][:33]:<35} {r['condition']:<25} {success_str:<10} {r['iterations']:<6} {r['coder_tokens']:<10}"
         )
 
-        # Check for issues
+    # Group by problem for paired comparison
+    print("\n" + "-" * 60)
+    print("PAIRED COMPARISON:")
+    print("-" * 60)
+
+    from collections import defaultdict
+
+    by_problem = defaultdict(dict)
+    for r in results:
+        by_problem[r["problem"]][r["condition"]] = r
+
+    for prob, conditions in by_problem.items():
+        unaware = conditions.get("no_awareness", {})
+        aware = conditions.get("overall_and_individual", {})
+
+        if unaware and aware:
+            u_result = "✓" if unaware.get("success") else "✗"
+            a_result = "✓" if aware.get("success") else "✗"
+            token_diff = aware.get("coder_tokens", 0) - unaware.get("coder_tokens", 0)
+
+            print(f"\n{prob[:50]}:")
+            print(
+                f"  Unaware: {u_result} ({unaware.get('iterations')} iter, {unaware.get('coder_tokens')} tok)"
+            )
+            print(
+                f"  Aware:   {a_result} ({aware.get('iterations')} iter, {aware.get('coder_tokens')} tok)"
+            )
+            print(f"  Token diff: {token_diff:+d}")
+
+    # Check for issues
+    print("\n" + "-" * 40)
+    print("ISSUE CHECK:")
+    print("-" * 40)
+    for r in results:
+        print(f"\n{r['condition']}:")
         issues = []
         if r["test_code_calls"] == 0:
             issues.append("⚠️  Reviewer never called test_code()")
@@ -414,7 +518,6 @@ async def main():
                 issues.append(f"⚠️  Possible code truncation: {tr['truncation_signs']}")
 
         if issues:
-            print("  Issues found:")
             for issue in issues:
                 print(f"    {issue}")
         else:

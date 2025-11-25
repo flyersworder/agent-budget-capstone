@@ -104,8 +104,8 @@ def generate_budget_message(
 ) -> str:
     """Generate budget awareness message for agents.
 
-    Design: Neutral framing - just total tokens, no reasoning/output split.
-    This isolates the pure effect of budget information without artificial constraints.
+    Design: Consequence-aware framing - explains what happens when limits are hit.
+    This makes the constraints actionable, not just informational.
 
     Args:
         awareness_condition: Budget awareness level
@@ -125,16 +125,16 @@ def generate_budget_message(
 
     if awareness_condition == MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL:
         if agent_role == "Coder":
-            # Neutral framing - just total tokens
-            return f"""[RESOURCE CONTEXT]
-You have {coder_budget} tokens per iteration.
-You have up to {max_iterations} iterations."""
+            # Consequence-aware framing - facts only, no behavioral guidance
+            return f"""[RESOURCE CONSTRAINTS]
+- {coder_budget} tokens per iteration (output is cut off if exceeded)
+- {max_iterations} iterations maximum (task fails if all used without success)"""
 
         else:  # Reviewer
-            # Neutral framing - just total tokens
-            return f"""[RESOURCE CONTEXT]
-You have {reviewer_budget} tokens per iteration.
-You have up to {max_iterations} iterations."""
+            # Consequence-aware framing - facts only, no behavioral guidance
+            return f"""[RESOURCE CONSTRAINTS]
+- {reviewer_budget} tokens per iteration (output is cut off if exceeded)
+- {max_iterations} iterations maximum (task fails if all used without success)"""
 
     # Fallback for other conditions - return empty (not used in current design)
     return ""
