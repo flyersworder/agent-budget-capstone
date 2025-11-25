@@ -23,3 +23,7 @@ claude.md
 experiments/results/**/*.png
 experiments/results/**/*.csv
 experiments/results/**/*.json
+
+# Archived experimental code and results (old designs)
+experiments/part2_multi_agent/archived_researcher_validator_design/
+experiments/results/archived_*/
