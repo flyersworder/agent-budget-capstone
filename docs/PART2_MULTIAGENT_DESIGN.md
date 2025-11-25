@@ -115,10 +115,11 @@ Based on our literature review on resource awareness and team performance, we ap
 - **No budget information** in initial prompts
 - **No status updates** between iterations
 - Pure focus on task instructions only
+- **Same team framing** as AWARE condition (consistent role context)
 
 **Coder prompt**:
 ```
-You are a Python programmer. Write code to solve this problem.
+You are the CODER in a 2-agent team. Your partner is a Reviewer who will test your code.
 
 PROBLEM:
 {problem_description}
@@ -133,7 +134,7 @@ Think through the algorithm carefully, then write clean, correct code.
 
 **Reviewer prompt**:
 ```
-You are a code reviewer. Test the code and decide whether to approve it.
+You are the REVIEWER in a 2-agent team. Your partner is a Coder who writes the code.
 
 WORKFLOW:
 1. Call test_code() to run the Coder's code against the test case
@@ -146,53 +147,48 @@ FEEDBACK: [Brief explanation of what happened]
 Be concise - the test result tells you everything you need to know.
 ```
 
-### Condition 2: OVERALL_AND_INDIVIDUAL (Budget Aware)
+### Condition 2: OVERALL_AND_INDIVIDUAL (Budget Aware - Challenge Framed)
+
+**Design Evolution**: Based on pilot study findings, we refined the budget message to use **challenge framing** without behavioral guidance. The key insight from literature: framing resources as "sufficient for" (challenge) rather than "limited to" (threat) promotes better performance.
 
 **Two components of awareness**:
-1. **Initial prompt framing** (challenge-oriented)
-2. **Ongoing status updates** (iteration-aware, actionable)
+1. **Initial prompt framing** (challenge-oriented, no behavioral advice)
+2. **Ongoing status updates** (factual token usage only)
 
-**Coder prompt** (with budget prefix):
+**Coder prompt** (with resource context prefix):
 ```
-[TEAM RESOURCES]
-You are the CODER in a 2-agent team.
+[RESOURCE CONTEXT]
+You have 3000 tokens per iteration - sufficient for a well-crafted solution.
+This includes 1500 for reasoning and 1500 for code output.
 
-Your allocation: 2048 tokens (80% of team)
-- Sufficient for deep algorithmic thinking and clean implementation
-- Focus your reasoning on getting the solution right the first time
+You have up to 3 iterations to get it right.
 
-Your partner (Reviewer): 512 tokens (20%)
-- Tests your code and provides targeted feedback if needed
-
-You have 3 iterations to succeed. A focused first attempt is most efficient.
-
-{standard coder instructions}
+{standard coder instructions - same as NO_AWARENESS}
 ```
 
-**Reviewer prompt** (with budget prefix):
+**Reviewer prompt** (with resource context prefix):
 ```
-[TEAM RESOURCES]
-You are the REVIEWER in a 2-agent team.
+[RESOURCE CONTEXT]
+You have 500 tokens per iteration - sufficient for testing and clear feedback.
+This includes 300 for analysis and 200 for your response.
 
-Your allocation: 512 tokens (20% of team)
-- Sufficient for test interpretation and clear feedback
-- The test_code tool handles execution - you analyze results and decide
+You have up to 3 iterations.
 
-Your partner (Coder): 2048 tokens (80%)
-
-You have 3 iterations. Be decisive: approve if tests pass, request specific fixes if not.
-
-{standard reviewer instructions}
+{standard reviewer instructions - same as NO_AWARENESS}
 ```
 
-**Status updates between iterations** (example after iteration 1):
+**Key design decisions**:
+- **No behavioral guidance**: Removed "focus on X" advice to isolate awareness effect
+- **No partner info**: Agents don't know partner's budget (realistic - we rarely know colleagues' allocations)
+- **Per-iteration framing**: Clear that budget is per iteration, not cumulative
+- **Consistent base instructions**: Both conditions use identical task instructions
+
+**Status updates between iterations** (factual only):
 ```
 [STATUS: Iteration 1 of 3 complete]
-Coder: 1500 tokens available (73% of allocation)
-Reviewer: 400 tokens available (78% of allocation)
-Team: 1900 tokens available (74% remaining)
-
-2 iteration(s) available for refinement.
+Coder tokens used: 2,000
+Reviewer tokens used: 150
+2 iteration(s) remaining.
 ```
 
 ## Sample Size and Power
@@ -314,6 +310,71 @@ class CodeReviewTrial:
     coder_tokens: int
     reviewer_tokens: int
 ```
+
+## Future Enhancement: Planning Phase with Budget Estimation
+
+### Motivation
+
+In real human teams, project work typically begins with a **planning phase** where:
+1. A project lead evaluates the task difficulty
+2. Estimates required effort (time, resources, iterations)
+3. Communicates these estimates to team members
+
+This mirrors how contracted projects work - teams know both the resource limit AND have an estimate of what's needed before starting.
+
+### Proposed Design
+
+Add a **planning agent** (or extend CheckApprovalAgent) that:
+1. Reads the problem description before main execution
+2. Estimates difficulty and expected iterations
+3. Passes estimates to Coder/Reviewer via their prompts
+
+### Implementation Approach (Low Effort)
+
+**Planning prompt** (single LLM call):
+```
+Analyze this programming problem and estimate:
+1. Difficulty (easy/medium/hard)
+2. Expected iterations needed (1-3)
+3. Brief reasoning
+
+PROBLEM:
+{problem_description}
+
+Output JSON: {"difficulty": "...", "estimated_iterations": N, "reasoning": "..."}
+```
+
+**Enhanced budget message for AWARE condition**:
+```
+[RESOURCE CONTEXT]
+You have 3000 tokens per iteration - sufficient for a well-crafted solution.
+This includes 1500 for reasoning and 1500 for code output.
+
+Task assessment: This appears to be a medium-difficulty problem,
+likely solvable in 2 iterations.
+
+You have up to 3 iterations to get it right.
+```
+
+### Why This Is More Realistic
+
+- Human teams don't just know their budget - they also estimate effort
+- Planning creates **shared mental models** (from literature review)
+- Estimates enable agents to calibrate their approach
+- Still focuses on awareness (not adaptive behavior) - keeps experiment clean
+
+### Research Questions This Enables
+
+1. **Estimation accuracy**: How well do agents estimate difficulty?
+2. **Calibration effects**: Does knowing the estimate change behavior?
+3. **Interaction**: Does accurate estimation + budget awareness improve outcomes?
+
+### Implementation Notes
+
+- Keep actual budgets fixed (don't change based on estimates)
+- Log estimates for analysis (compare to actual difficulty labels)
+- Simple addition: one LLM call + modified prompt template
+- Can be tested as a follow-up study after current pilot
 
 ## References
 
