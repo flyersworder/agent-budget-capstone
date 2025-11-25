@@ -271,6 +271,7 @@ async def run_code_review_trial(
     awareness_condition: MultiAgentAwarenessCondition,
     max_iterations: int = 3,
     difficulty: str = "medium",
+    planner_estimate: dict[str, Any] | None = None,
 ) -> CodeReviewTrial:
     """Run a single code review trial using LoopAgent pattern.
 
@@ -279,6 +280,7 @@ async def run_code_review_trial(
         awareness_condition: Budget awareness level
         max_iterations: Maximum iterations allowed (default: 3)
         difficulty: Problem difficulty ("easy" or "medium") for budget scaling
+        planner_estimate: Optional planner estimate for PLANNER_ESTIMATED condition
 
     Returns:
         CodeReviewTrial with full results
@@ -384,6 +386,7 @@ async def run_code_review_trial(
         awareness_condition=awareness_condition,
         max_iterations=max_iterations,
         difficulty=difficulty,
+        planner_estimate=planner_estimate,
     )
 
     # Session setup

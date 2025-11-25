@@ -47,29 +47,56 @@ class PlannerEstimate:
         }
 
 
-# Planner prompt - asks for structured JSON output
-PLANNER_PROMPT = """You are a planning agent. Your task is to estimate the resources needed to solve a programming problem.
+# Planner prompt - optimized for Gemini 2.5 Flash Lite per prompting best practices
+# Key improvements: XML structure, few-shot examples, explicit format, constraints first
+PLANNER_PROMPT = """<critical_constraint>
+Output ONLY a JSON object. Do NOT include any explanation or markdown.
+</critical_constraint>
 
-PROBLEM:
+<role>You are a code complexity estimator that predicts resource needs for programming problems.</role>
+
+<task>
+Analyze the problem and estimate:
+1. Tokens needed per iteration (code length)
+2. Number of iterations likely needed (1-3)
+</task>
+
+<guidelines>
+Token estimates by complexity:
+- Simple (basic I/O, single loop): 500-1500 tokens
+- Medium (multiple functions, conditionals): 1500-2500 tokens
+- Complex (DP, graphs, optimization): 2500-4000 tokens
+
+Iteration estimates:
+- Straightforward logic: 1 iteration
+- Moderate edge cases: 2 iterations
+- Tricky constraints or algorithms: 3 iterations
+</guidelines>
+
+<examples>
+<example>
+<problem>Given an array, return the sum of all elements.</problem>
+<output>{{"estimated_tokens_per_iteration": 800, "estimated_iterations": 1, "reasoning": "Simple iteration and summation, minimal code needed."}}</output>
+</example>
+
+<example>
+<problem>Implement a function to find the longest palindromic substring.</problem>
+<output>{{"estimated_tokens_per_iteration": 2200, "estimated_iterations": 2, "reasoning": "Requires DP or expand-around-center approach with edge case handling."}}</output>
+</example>
+
+<example>
+<problem>Given a grid, find the shortest path avoiding obstacles using BFS.</problem>
+<output>{{"estimated_tokens_per_iteration": 3000, "estimated_iterations": 3, "reasoning": "Graph traversal with queue management, visited tracking, and boundary checks."}}</output>
+</example>
+</examples>
+
+<problem>
 {problem_description}
+</problem>
 
-Based on this problem, estimate:
-1. How many tokens (code output) will be needed per iteration attempt?
-   - Simple problems: 500-1500 tokens
-   - Medium problems: 1500-2500 tokens
-   - Complex problems: 2500-4000 tokens
-
-2. How many iterations will likely be needed?
-   - Easy problems: typically 1-2 iterations
-   - Medium problems: typically 2-3 iterations
-   - Complex problems: may need all 3 iterations
-
-Respond with ONLY a JSON object in this exact format:
-{{
-    "estimated_tokens_per_iteration": <integer>,
-    "estimated_iterations": <integer 1-3>,
-    "reasoning": "<brief 1-2 sentence explanation>"
-}}"""
+<format>
+{{"estimated_tokens_per_iteration": <int>, "estimated_iterations": <int 1-3>, "reasoning": "<1 sentence>"}}
+</format>"""
 
 
 async def estimate_budget(
@@ -99,7 +126,7 @@ async def estimate_budget(
         contents=prompt,
         config=types.GenerateContentConfig(
             max_output_tokens=max_tokens,
-            temperature=0.1,  # Low temperature for consistent estimates
+            temperature=0.1,  # Low temperature for consistent, reproducible estimates
         ),
     )
 

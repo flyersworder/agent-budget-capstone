@@ -2,7 +2,9 @@
 
 ## Executive Summary
 
-This study investigated whether budget awareness affects multi-agent team performance in iterative code generation tasks. We tested a Coder-Reviewer team architecture on 70 LiveCodeBench problems (140 total trials in a within-subjects design).
+This study investigated whether budget awareness affects multi-agent team performance in iterative code generation tasks. We tested a Coder-Reviewer team architecture on LiveCodeBench problems using within-subjects designs.
+
+### Study 1: Consequence-Aware Framing (n=140)
 
 **Key Finding**: Consequence-aware budget framing significantly improves first-iteration success.
 
@@ -13,7 +15,22 @@ This study investigated whether budget awareness affects multi-agent team perfor
 | Avg tokens | 4,440 | 3,809 | -631 | - |
 | Truncation rate | 4.3% | 0.0% | -4.3pp | - |
 
-The critical insight: **Simply telling agents about budgets doesn't help. Telling them about consequences (truncation, task failure) does.**
+### Study 2: Dynamic Budget Planning (n=140)
+
+**Key Finding**: Planner-estimated dynamic budgets **hurt** performance compared to fixed budgets.
+
+| Metric | Fixed Budget | Planner Estimated | Difference | p-value |
+|--------|-------------|-------------------|------------|---------|
+| First-iteration success | 54.3% | 41.4% | -12.9pp | **0.022** |
+| Overall success | 80.0% | 68.6% | -11.4pp | 0.12 |
+| Avg tokens | 3,644 | 4,427 | +783 | - |
+
+### Combined Insight
+
+**Simple, consequence-aware fixed budgets are optimal.**
+- Telling agents about consequences helps (+15.7pp)
+- Adding dynamic planning hurts (-12.9pp)
+- More information isn't always better
 
 ---
 
@@ -300,6 +317,183 @@ This study demonstrates that **consequence-aware budget framing significantly im
 - **Robust** (zero truncation in aware condition)
 
 The key insight is that agents respond to **stakes** (what happens when limits are exceeded) rather than **information** (what the limits are). This has direct implications for prompt engineering in resource-constrained AI systems.
+
+---
+
+## Extension Study: Dynamic Budget Planning
+
+### Research Question
+
+Can a **planner agent** that dynamically estimates budget requirements per problem improve performance compared to fixed difficulty-based budgets?
+
+### Motivation
+
+The consequence-aware condition uses fixed budgets (2000 tokens for easy, 3000 for medium). We hypothesized that a planning stage could:
+1. Better allocate resources to complex problems
+2. Avoid over-allocating to simple problems
+3. Provide problem-specific guidance to the coder
+
+### Design
+
+**OVERALL_AND_INDIVIDUAL (Fixed Budget)**:
+- Easy problems: 2000 tokens/iteration
+- Medium problems: 3000 tokens/iteration
+- Uses consequence-aware framing
+
+**PLANNER_ESTIMATED (Dynamic Budget)**:
+- Planner agent analyzes problem first
+- Estimates tokens needed per iteration (500-4000 range)
+- Estimates iterations likely needed (1-3)
+- Coder receives planner's estimates in prompt
+
+**Planner Implementation**:
+- Single LLM call with structured JSON output
+- Same model (Gemini 2.5 Flash Lite)
+- Low temperature (0.1) for consistent estimates
+- XML-structured prompt with 3 few-shot examples
+
+### Results (n=140, 70 problems × 2 conditions)
+
+| Metric | Fixed Budget | Planner Estimated | Difference | p-value |
+|--------|-------------|-------------------|------------|---------|
+| Overall success | 80.0% | 68.6% | **-11.4pp** | 0.12 |
+| First-iteration success | 54.3% | 41.4% | **-12.9pp** | **0.022** |
+| Avg iterations | 1.73 | 2.03 | +0.30 | - |
+| Avg tokens | 3,644 | 4,427 | +783 | - |
+
+**Key Finding**: Dynamic budget planning **hurts** performance compared to fixed budgets.
+
+### Paired Analysis
+
+| Outcome Pattern | Count |
+|-----------------|-------|
+| Both succeeded | 42 |
+| Both failed | 8 |
+| Fixed Budget won | 14 |
+| Planner won | 6 |
+
+**McNemar's test**: p = 0.115 (overall), p = 0.022 (first-iteration)
+
+The 14:6 ratio of discordant pairs shows Fixed Budget winning more than twice as often.
+
+### Qualitative Insights
+
+#### 1. Paradox of Complexity Signaling
+
+When the planner assigns high budgets (3500 tokens), success rate drops dramatically:
+
+| Planner Budget | Trials | Success Rate |
+|----------------|--------|--------------|
+| ≤1200 tokens | 16 | 86% |
+| 1800-2800 | 32 | 70% |
+| 3500 tokens | 21 | **48%** |
+
+**Interpretation**: High budget signals "this is hard" to the coder, potentially inducing:
+- Over-engineering
+- Overthinking the solution
+- Premature optimization
+
+#### 2. Estimation Calibration is Inverted
+
+| Trial Outcome | Mean Estimation Error |
+|---------------|----------------------|
+| Successful | -31.6% (under-estimated) |
+| Failed | +29.7% (over-estimated) |
+
+The planner's perception of complexity is **inversely correlated** with actual tractability. Problems it thinks are hard tend to be solved; problems it thinks are easy often fail.
+
+#### 3. Token Limit Behavior
+
+| Condition | Iterations Hitting Token Limit |
+|-----------|-------------------------------|
+| Fixed Budget | 26.4% |
+| Planner Est | 35.9% |
+
+Counter-intuitively, the planner condition hits token limits **more often**, not less.
+
+#### 4. Case Studies: When Fixed Budget Won
+
+| Problem | Fixed | Planner | Pattern |
+|---------|-------|---------|---------|
+| maximize-active-section-with-trade-i | 1 iter, SUCCESS | 3 iter, FAIL | Planner over-complicated |
+| eat-pizzas | 1 iter, SUCCESS | 3 iter, FAIL | Planner over-complicated |
+| Takahashi the Wall Breaker | 1 iter, SUCCESS | 3 iter, FAIL | Planner set 3500 budget |
+| Gravity | 3 iter, SUCCESS | 3 iter, FAIL | Similar tokens, different outcome |
+
+**Pattern**: When Fixed Budget won, it often solved in fewer iterations. The planner's high budget estimate seemed to give the coder "permission" to be verbose.
+
+#### 5. Case Studies: When Planner Won
+
+| Problem | Fixed | Planner | Pattern |
+|---------|-------|---------|---------|
+| assign-elements-to-groups-with-constraints | 3 iter, FAIL | 2 iter, SUCCESS | Planner: 2800 tokens, 2 iterations |
+| zero-array-transformation-iv | 3 iter, FAIL | 2 iter, SUCCESS | Planner: 3500 tokens, 3 iterations |
+| maximum-containers-on-a-ship | 3 iter, FAIL (truncation) | 3 iter, SUCCESS | Fixed hit truncation |
+
+**Pattern**: Planner helped when Fixed Budget hit truncation (rare) or when its 2-iteration estimate created urgency.
+
+### Why Dynamic Planning Hurts
+
+#### Hypothesis A: Constraint Distraction
+
+The planner-estimated condition adds complexity to the prompt:
+```
+The planner estimates you'll need approximately 3500 tokens per iteration
+and 3 iterations to solve this problem.
+```
+
+This additional information may:
+- Distract from the core coding task
+- Create "token anxiety"
+- Reduce focus on problem-solving
+
+#### Hypothesis B: Self-Fulfilling Prophecy
+
+When told a problem needs 3 iterations:
+- Coder may not try as hard on iteration 1
+- Expects to iterate, so produces "draft" code
+- First-iteration success drops significantly
+
+#### Hypothesis C: KISS Principle
+
+Simple fixed budgets work better because:
+- Less cognitive load in the prompt
+- Model can focus purely on the problem
+- No interpretation of planner estimates needed
+
+### Implications
+
+1. **Dynamic resource allocation may backfire**
+   - More information isn't always better
+   - Problem complexity signals can be counterproductive
+
+2. **Fixed budgets are robust**
+   - Simple difficulty-based heuristics outperform sophisticated estimation
+   - 2000/3000 token split is "good enough"
+
+3. **Planner-in-the-loop has hidden costs**
+   - Extra LLM call overhead
+   - Potential for miscalibration
+   - Complexity signaling effects
+
+4. **For multi-agent systems**: Sometimes the simplest coordination mechanism (fixed budgets) beats sophisticated planning.
+
+### Files
+
+- **Planner results**: `experiments/results/part2_code_review/study_20251125_200256.json`
+- **Planner implementation**: `agent_budget/planner.py`
+
+---
+
+## Overall Conclusions
+
+This study demonstrates two key findings about budget awareness in multi-agent systems:
+
+1. **Consequence framing works**: Telling agents about consequences (+15.7pp first-iteration success, p=0.003)
+
+2. **Dynamic planning backfires**: Planner-estimated budgets hurt performance (-12.9pp first-iteration success, p=0.022)
+
+The combined insight: **Simple, consequence-aware fixed budgets** are the optimal approach. Adding complexity through dynamic planning provides no benefit and may actively harm performance through complexity signaling and constraint distraction.
 
 ---
 

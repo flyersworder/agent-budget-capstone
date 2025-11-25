@@ -4,20 +4,30 @@ Tests how budget awareness affects Coder-Reviewer team performance on
 LiveCodeBench problems.
 
 Design (WITHIN-SUBJECTS):
-- 2 awareness conditions: NO_AWARENESS vs OVERALL_AND_INDIVIDUAL
+- 3 awareness conditions: NO_AWARENESS, OVERALL_AND_INDIVIDUAL, PLANNER_ESTIMATED
 - 2 difficulty levels: EASY vs MEDIUM
 - All available problems from LiveCodeBench (31 easy + 39 medium = 70)
-- Each problem tested with BOTH conditions = 140 total trials
+- Each problem tested with selected conditions
 - Within-subjects allows paired comparisons for more statistical power
 
 Sample size rationale:
-- 70 problems × 2 conditions = 140 trials total
+- 70 problems × N conditions = 70*N trials total
 - Paired design increases power vs between-subjects
 - Bootstrap with 10,000 resamples provides stable CIs
 - McNemar's test for paired binary outcomes
 
 Usage:
-    python -m experiments.part2_multi_agent.run_code_review_study
+    # Run all 3 conditions (210 trials)
+    python -m experiments.part2_multi_agent.run_code_review_study --conditions all
+
+    # Run original 2 conditions (140 trials)
+    python -m experiments.part2_multi_agent.run_code_review_study --conditions NO_AWARENESS OVERALL_AND_INDIVIDUAL
+
+    # Run planner comparison only (140 trials)
+    python -m experiments.part2_multi_agent.run_code_review_study --conditions OVERALL_AND_INDIVIDUAL PLANNER_ESTIMATED
+
+    # Override seed
+    python -m experiments.part2_multi_agent.run_code_review_study --seed 123
 """
 
 import asyncio
@@ -34,17 +44,22 @@ from dotenv import load_dotenv
 
 from agent_budget.code_review_runner import run_code_review_trial
 from agent_budget.core import MultiAgentAwarenessCondition
+from agent_budget.planner import estimate_budget
+
+
+# All available conditions
+ALL_CONDITIONS = ["NO_AWARENESS", "OVERALL_AND_INDIVIDUAL", "PLANNER_ESTIMATED"]
 
 
 @dataclass
 class StudyConfig:
     """Configuration for code review study."""
 
-    # Sample sizes (within-subjects: each problem tested with both conditions)
+    # Sample sizes (within-subjects: each problem tested with all conditions)
     # Set high to use all available problems (31 easy + 39 medium = 70 problems)
     problems_per_difficulty: int = 100  # Will cap at available
 
-    # Conditions
+    # Conditions - can be customized via command line
     awareness_conditions: list[str] = field(
         default_factory=lambda: ["NO_AWARENESS", "OVERALL_AND_INDIVIDUAL"]
     )
@@ -192,10 +207,11 @@ async def run_study(config: StudyConfig | None = None) -> StudyResults:
     condition_map = {
         "NO_AWARENESS": MultiAgentAwarenessCondition.NO_AWARENESS,
         "OVERALL_AND_INDIVIDUAL": MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL,
+        "PLANNER_ESTIMATED": MultiAgentAwarenessCondition.PLANNER_ESTIMATED,
     }
 
     # Run trials - WITHIN-SUBJECTS DESIGN
-    # Each problem is tested with BOTH awareness conditions
+    # Each problem is tested with ALL selected awareness conditions
     # This gives us paired comparisons for more statistical power
     trial_num = 0
 
@@ -205,12 +221,40 @@ async def run_study(config: StudyConfig | None = None) -> StudyResults:
         pid = problem.get("question_id", str(hash(problem["question_title"])))
         problem_groups[pid] = (problem, difficulty)
 
+    # Check if we need planner estimates
+    needs_planner = "PLANNER_ESTIMATED" in config.awareness_conditions
+
+    # Pre-compute planner estimates for all problems if needed
+    # (Get estimate once per problem, reuse for all trials of that problem)
+    planner_estimates: dict[str, dict[str, Any]] = {}
+    if needs_planner:
+        print("\nGenerating planner estimates for all problems...")
+        for pid, (problem, difficulty) in problem_groups.items():
+            try:
+                est = await estimate_budget(problem.get("question_content", ""))
+                planner_estimates[pid] = est.to_dict()
+                print(
+                    f"  {pid[:20]}... -> {est.estimated_tokens_per_iteration} tok, {est.estimated_iterations} iter"
+                )
+            except Exception as e:
+                print(f"  {pid[:20]}... -> ERROR: {e}, using defaults")
+                planner_estimates[pid] = {
+                    "estimated_tokens_per_iteration": 2500,
+                    "estimated_iterations": 2,
+                    "reasoning": "Planner failed, using defaults",
+                }
+        print(f"Generated {len(planner_estimates)} planner estimates")
+
     # Create assignments: each problem × each condition
-    # (problem, difficulty, condition_str)
-    assignments: list[tuple[dict[str, Any], str, str]] = []
+    # (problem, difficulty, condition_str, planner_estimate_or_none)
+    assignments: list[tuple[dict[str, Any], str, str, dict[str, Any] | None]] = []
     for pid, (problem, difficulty) in problem_groups.items():
         for cond_str in config.awareness_conditions:
-            assignments.append((problem, difficulty, cond_str))
+            # Only include planner estimate for PLANNER_ESTIMATED condition
+            planner_dict = (
+                planner_estimates.get(pid) if cond_str == "PLANNER_ESTIMATED" else None
+            )
+            assignments.append((problem, difficulty, cond_str, planner_dict))
 
     # Randomize execution order to avoid systematic effects
     random.seed(config.random_seed)
@@ -220,12 +264,17 @@ async def run_study(config: StudyConfig | None = None) -> StudyResults:
     print(f"\nStarting {total_trials} trials...")
     print("=" * 80)
 
-    for problem, difficulty, condition_str in assignments:
+    for problem, difficulty, condition_str, planner_estimate in assignments:
         trial_num += 1
         condition = condition_map[condition_str]
 
         print(f"\n[{trial_num}/{total_trials}] {problem['question_title'][:50]}...")
-        print(f"  Difficulty: {difficulty} | Condition: {condition_str}")
+        extra = ""
+        if planner_estimate:
+            extra = (
+                f" | Planner: {planner_estimate['estimated_tokens_per_iteration']} tok"
+            )
+        print(f"  Difficulty: {difficulty} | Condition: {condition_str}{extra}")
 
         start_time = time.time()
         try:
@@ -234,6 +283,7 @@ async def run_study(config: StudyConfig | None = None) -> StudyResults:
                 awareness_condition=condition,
                 max_iterations=config.max_iterations,
                 difficulty=difficulty,
+                planner_estimate=planner_estimate,
             )
 
             # Convert to dict for storage
@@ -272,6 +322,8 @@ async def run_study(config: StudyConfig | None = None) -> StudyResults:
                     }
                     for d in trial_result.iteration_details
                 ],
+                # Planner estimate (for PLANNER_ESTIMATED condition)
+                "planner_estimate": planner_estimate,
             }
 
             # Show status with failure reason
@@ -306,6 +358,8 @@ async def run_study(config: StudyConfig | None = None) -> StudyResults:
                 "failure_reason": "error",
                 "any_truncation": False,
                 "iteration_truncations": [],
+                # Planner estimate (for PLANNER_ESTIMATED condition)
+                "planner_estimate": planner_estimate,
             }
 
         results.trials.append(trial_dict)
@@ -387,12 +441,17 @@ def print_summary(results: StudyResults) -> None:
 
     print(f"\nTrials with ANY truncation: {truncation_count}/{results.total_trials}")
 
-    # By condition
+    # By condition (dynamically get conditions from results)
     print("\n" + "-" * 40)
     print("BY AWARENESS CONDITION:")
     print("-" * 40)
 
-    for condition in ["NO_AWARENESS", "OVERALL_AND_INDIVIDUAL"]:
+    # Get unique conditions from results
+    conditions_in_results = sorted(
+        set(t["awareness_condition"] for t in results.trials)
+    )
+
+    for condition in conditions_in_results:
         trials = [t for t in results.trials if t["awareness_condition"] == condition]
         if not trials:
             continue
@@ -429,7 +488,7 @@ def print_summary(results: StudyResults) -> None:
         print(f"  Avg iterations: {avg_iterations:.2f}")
         print(f"  Truncations: {truncations}/{len(trials)}")
 
-    # By condition × difficulty (2×2 design)
+    # By condition × difficulty (dynamic)
     print("\n" + "-" * 40)
     print("BY CONDITION × DIFFICULTY:")
     print("-" * 40)
@@ -437,7 +496,7 @@ def print_summary(results: StudyResults) -> None:
     print(f"\n{'Condition':<30} {'Easy':<15} {'Medium':<15}")
     print("-" * 60)
 
-    for condition in ["NO_AWARENESS", "OVERALL_AND_INDIVIDUAL"]:
+    for condition in conditions_in_results:
         row = f"{condition:<30}"
         for difficulty in ["easy", "medium"]:
             trials = [
@@ -454,13 +513,50 @@ def print_summary(results: StudyResults) -> None:
         print(row)
 
 
+def parse_conditions(argv: list[str]) -> list[str]:
+    """Parse --conditions argument from command line.
+
+    Supports:
+        --conditions all                                     # All 3 conditions
+        --conditions NO_AWARENESS OVERALL_AND_INDIVIDUAL     # Specific conditions
+        (no --conditions arg)                                # Default: 2 conditions
+
+    Returns:
+        List of condition strings
+    """
+    if "--conditions" not in argv:
+        # Default: original 2 conditions
+        return ["NO_AWARENESS", "OVERALL_AND_INDIVIDUAL"]
+
+    idx = argv.index("--conditions")
+    conditions = []
+
+    # Collect all args after --conditions until we hit another flag or end
+    for i in range(idx + 1, len(argv)):
+        arg = argv[i]
+        if arg.startswith("--"):
+            break
+        if arg.lower() == "all":
+            return ALL_CONDITIONS.copy()
+        if arg in ALL_CONDITIONS:
+            conditions.append(arg)
+        else:
+            print(f"WARNING: Unknown condition '{arg}', skipping")
+
+    if not conditions:
+        print("WARNING: No valid conditions specified, using defaults")
+        return ["NO_AWARENESS", "OVERALL_AND_INDIVIDUAL"]
+
+    return conditions
+
+
 async def main() -> None:
     """Main entry point."""
     import sys
 
     load_dotenv()
 
-    # Allow seed override via command line: python -m ... --seed 123
+    # Parse command line arguments
     seed = 42
     if "--seed" in sys.argv:
         idx = sys.argv.index("--seed")
@@ -468,9 +564,13 @@ async def main() -> None:
             seed = int(sys.argv[idx + 1])
             print(f"Using custom seed: {seed}")
 
+    conditions = parse_conditions(sys.argv)
+    print(f"Running with conditions: {conditions}")
+
     config = StudyConfig(
-        # Uses all available problems (31 easy + 39 medium = 70 × 2 conditions = 140 trials)
+        # Uses all available problems (31 easy + 39 medium = 70 × N conditions)
         random_seed=seed,
+        awareness_conditions=conditions,
     )
 
     results = await run_study(config)
