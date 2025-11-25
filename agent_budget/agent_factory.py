@@ -823,7 +823,9 @@ class AgentFactory:
             tools=[],  # No tools - just write code directly
             planner=BuiltInPlanner(
                 thinking_config=types.ThinkingConfig(
-                    thinking_budget=coder_budget.reasoning_tokens,
+                    # High thinking budget = effectively unconstrained thinking
+                    # We only constrain total output via max_output_tokens
+                    thinking_budget=10000,
                     include_thoughts=True,
                 )
             ),

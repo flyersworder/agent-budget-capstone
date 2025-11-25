@@ -5,7 +5,7 @@ iterative code review system.
 
 Part 2 Experiment Design (Simplified):
 - 2 conditions: NO_AWARENESS vs OVERALL_AND_INDIVIDUAL
-- Meaningful framing: Budget reflects role specialization, not just numbers
+- Neutral framing: Just facts, no motivational language
 """
 
 from agent_budget.core import (
@@ -104,11 +104,8 @@ def generate_budget_message(
 ) -> str:
     """Generate budget awareness message for agents.
 
-    Design principles (from literature review):
-    1. Challenge framing: Frame budget as "sufficient for" not "limited to"
-    2. Focusing dividend: Constraints help prioritize what matters
-    3. Role specialization: Give meaningful reason for allocation
-    4. Actionable: Tell agents what they CAN do, not just what they can't
+    Design: Neutral framing - just total tokens, no reasoning/output split.
+    This isolates the pure effect of budget information without artificial constraints.
 
     Args:
         awareness_condition: Budget awareness level
@@ -122,32 +119,21 @@ def generate_budget_message(
     if awareness_condition == MultiAgentAwarenessCondition.NO_AWARENESS:
         return ""
 
-    # Get difficulty-based budget values
-    coder_budget_obj = get_coder_budget(difficulty)
-    coder_budget = coder_budget_obj.total
+    # Get difficulty-based budget values (total only, no split)
+    coder_budget = get_coder_budget(difficulty).total
     reviewer_budget = CODE_REVIEW_REVIEWER_BUDGET.total
-
-    # Get detailed budget breakdown for mechanism explanation
-    coder_thinking = coder_budget_obj.reasoning_tokens
-    coder_output = coder_budget_obj.output_tokens
-    reviewer_thinking = CODE_REVIEW_REVIEWER_BUDGET.reasoning_tokens
-    reviewer_output = CODE_REVIEW_REVIEWER_BUDGET.output_tokens
 
     if awareness_condition == MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL:
         if agent_role == "Coder":
-            # Challenge-framed resource context - no behavioral guidance
+            # Neutral framing - just total tokens
             return f"""[RESOURCE CONTEXT]
-You have {coder_budget} tokens per iteration - sufficient for a well-crafted solution.
-This includes {coder_thinking} for reasoning and {coder_output} for code output.
-
-You have up to {max_iterations} iterations to get it right."""
+You have {coder_budget} tokens per iteration.
+You have up to {max_iterations} iterations."""
 
         else:  # Reviewer
-            # Challenge-framed resource context - no behavioral guidance
+            # Neutral framing - just total tokens
             return f"""[RESOURCE CONTEXT]
-You have {reviewer_budget} tokens per iteration - sufficient for testing and clear feedback.
-This includes {reviewer_thinking} for analysis and {reviewer_output} for your response.
-
+You have {reviewer_budget} tokens per iteration.
 You have up to {max_iterations} iterations."""
 
     # Fallback for other conditions - return empty (not used in current design)
