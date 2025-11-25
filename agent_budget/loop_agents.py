@@ -158,68 +158,22 @@ class CheckApprovalAgent(BaseAgent):  # type: ignore[misc]
         Returns:
             Formatted status message with iteration context
         """
-        awareness = getattr(
-            self, "_awareness_condition", MultiAgentAwarenessCondition.NO_AWARENESS
-        )
-        r_budget = getattr(self, "_researcher_budget_total", 0)
-        v_budget = getattr(self, "_validator_budget_total", 0)
-        team_budget = getattr(self, "_team_budget_total", 0)
         max_iterations = getattr(self, "_max_iterations", 3)
         agent1_name = getattr(self, "_agent1_name", "Researcher")
         agent2_name = getattr(self, "_agent2_name", "Validator")
 
         remaining_iterations = max_iterations - current_iteration
 
-        # Start with iteration context (temporal awareness)
+        # Status message with both agents' token usage from this iteration
+        # - Shows iteration progress
+        # - Shows each agent's tokens used (so both can adjust)
+        # - Both agents see this message
         lines = [
-            f"[STATUS: Iteration {current_iteration} of {max_iterations} complete]"
+            f"[STATUS: Iteration {current_iteration} of {max_iterations} complete]",
+            f"{agent1_name} tokens used: {r_total:,}",
+            f"{agent2_name} tokens used: {v_total:,}",
+            f"{remaining_iterations} iteration(s) remaining.",
         ]
-
-        # Individual agent details (for OVERALL_AND_INDIVIDUAL)
-        if awareness == MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL:
-            # Agent 1 - focus on remaining capacity
-            r_remaining = max(0, r_budget - r_total)
-            r_remaining_pct = (r_remaining / r_budget * 100) if r_budget > 0 else 0
-            lines.append(
-                f"{agent1_name}: {r_remaining:,} tokens available ({r_remaining_pct:.0f}% of allocation)"
-            )
-
-            # Agent 2 - focus on remaining capacity
-            v_remaining = max(0, v_budget - v_total)
-            v_remaining_pct = (v_remaining / v_budget * 100) if v_budget > 0 else 0
-            lines.append(
-                f"{agent2_name}: {v_remaining:,} tokens available ({v_remaining_pct:.0f}% of allocation)"
-            )
-
-        # Team summary (for OVERALL_ONLY and OVERALL_AND_INDIVIDUAL)
-        if awareness in [
-            MultiAgentAwarenessCondition.OVERALL_ONLY,
-            MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL,
-        ]:
-            team_remaining = max(0, team_budget - team_total)
-            team_remaining_pct = (
-                (team_remaining / team_budget * 100) if team_budget > 0 else 0
-            )
-            lines.append(
-                f"Team: {team_remaining:,} tokens available ({team_remaining_pct:.0f}% remaining)"
-            )
-
-            # Add actionable guidance based on situation
-            guidance = self._get_actionable_guidance(
-                team_remaining_pct, remaining_iterations
-            )
-            if guidance:
-                lines.append("")
-                lines.append(guidance)
-
-        # Fallback for other conditions (just show usage)
-        if awareness not in [
-            MultiAgentAwarenessCondition.OVERALL_ONLY,
-            MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL,
-        ]:
-            lines.append(
-                f"Usage this iteration: {agent1_name} {r_total:,}, {agent2_name} {v_total:,}"
-            )
 
         lines.append("")  # Blank line at end
         return "\n".join(lines)
@@ -227,27 +181,18 @@ class CheckApprovalAgent(BaseAgent):  # type: ignore[misc]
     def _get_actionable_guidance(
         self, remaining_pct: float, remaining_iterations: int
     ) -> str:
-        """Generate actionable guidance based on resources and iterations remaining.
+        """Generate simple iteration count - no behavioral guidance.
 
-        Uses challenge framing (what you can do) not threat framing (what you can't).
+        Keeping this minimal to avoid confounding the budget awareness manipulation.
 
         Args:
             remaining_pct: Percentage of budget remaining (0-100)
             remaining_iterations: Number of iterations left
 
         Returns:
-            Actionable guidance string
+            Simple iteration info string
         """
         if remaining_iterations == 0:
-            # Final iteration - encourage focus
-            return "Final iteration: Focus on the specific issue identified."
-
-        if remaining_pct < 25:
-            # Low resources but still iterations left
-            return f"{remaining_iterations} iteration(s) left. Focus revisions on the specific failing test."
-        elif remaining_pct < 50:
-            # Moderate resources
-            return f"{remaining_iterations} iteration(s) available. Target the root cause of the failure."
+            return "Final iteration."
         else:
-            # Plenty of resources
-            return f"{remaining_iterations} iteration(s) available for refinement."
+            return f"{remaining_iterations} iteration(s) remaining."

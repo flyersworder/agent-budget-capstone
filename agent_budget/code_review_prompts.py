@@ -12,7 +12,6 @@ from agent_budget.core import (
     CODE_REVIEW_REVIEWER_BUDGET,
     MultiAgentAwarenessCondition,
     get_coder_budget,
-    get_code_review_team_budget,
 )
 
 
@@ -56,7 +55,8 @@ def generate_coder_instruction(
     # Escape curly braces in problem description to prevent ADK template errors
     safe_problem = escape_curly_braces(problem_description)
 
-    return f"""{prefix}You are a Python programmer. Write code to solve this problem.
+    # Team framing is consistent for BOTH conditions
+    return f"""{prefix}You are the CODER in a 2-agent team. Your partner is a Reviewer who will test your code.
 
 PROBLEM:
 {safe_problem}
@@ -82,7 +82,8 @@ def generate_reviewer_instruction(
     """
     prefix = f"{budget_message}\n\n" if budget_message else ""
 
-    return f"""{prefix}You are a code reviewer. Test the code and decide whether to approve it.
+    # Team framing is consistent for BOTH conditions
+    return f"""{prefix}You are the REVIEWER in a 2-agent team. Your partner is a Coder who writes the code.
 
 WORKFLOW:
 1. Call test_code() to run the Coder's code against the test case
@@ -123,11 +124,8 @@ def generate_budget_message(
 
     # Get difficulty-based budget values
     coder_budget_obj = get_coder_budget(difficulty)
-    team_total = get_code_review_team_budget(difficulty)
     coder_budget = coder_budget_obj.total
-    coder_pct = round(100 * coder_budget / team_total)
     reviewer_budget = CODE_REVIEW_REVIEWER_BUDGET.total
-    reviewer_pct = round(100 * reviewer_budget / team_total)
 
     # Get detailed budget breakdown for mechanism explanation
     coder_thinking = coder_budget_obj.reasoning_tokens
@@ -137,42 +135,20 @@ def generate_budget_message(
 
     if awareness_condition == MultiAgentAwarenessCondition.OVERALL_AND_INDIVIDUAL:
         if agent_role == "Coder":
-            # Challenge framing with mechanism explanation
-            return f"""[TEAM RESOURCES]
-You are the CODER in a 2-agent team.
+            # Challenge-framed resource context - no behavioral guidance
+            return f"""[RESOURCE CONTEXT]
+You have {coder_budget} tokens per iteration - sufficient for a well-crafted solution.
+This includes {coder_thinking} for reasoning and {coder_output} for code output.
 
-Your allocation: {coder_budget} tokens ({coder_pct}% of team)
-- {coder_thinking} tokens for thinking/reasoning (internal deliberation)
-- {coder_output} tokens for output (your code)
-
-HOW TOKENS WORK: Both thinking and output consume your budget. Use them wisely:
-- Efficient thinking: Focus on the core algorithm, avoid over-analyzing edge cases
-- Efficient output: Write clean, complete code without verbose comments
-
-Your partner (Reviewer): {reviewer_budget} tokens ({reviewer_pct}%)
-- Tests your code and provides targeted feedback if needed
-
-You have {max_iterations} iterations to succeed. A focused first attempt is most efficient."""
+You have up to {max_iterations} iterations to get it right."""
 
         else:  # Reviewer
-            # Challenge framing with mechanism explanation
-            return f"""[TEAM RESOURCES]
-You are the REVIEWER in a 2-agent team.
+            # Challenge-framed resource context - no behavioral guidance
+            return f"""[RESOURCE CONTEXT]
+You have {reviewer_budget} tokens per iteration - sufficient for testing and clear feedback.
+This includes {reviewer_thinking} for analysis and {reviewer_output} for your response.
 
-Your allocation: {reviewer_budget} tokens ({reviewer_pct}% of team)
-- {reviewer_thinking} tokens for thinking/reasoning
-- {reviewer_output} tokens for output (your decision)
+You have up to {max_iterations} iterations."""
 
-HOW TOKENS WORK: Both thinking and output consume your budget. Use them wisely:
-- The test_code tool execution is FREE (doesn't use tokens)
-- Your tokens are for interpreting results and writing feedback
-
-Your partner (Coder): {coder_budget} tokens ({coder_pct}%)
-
-You have {max_iterations} iterations. Be decisive: approve if tests pass, request specific fixes if not."""
-
-    # Fallback for other conditions (OVERALL_ONLY, RESERVE_AWARENESS)
-    # Not used in simplified 2x2 design but kept for compatibility
-    return f"""[TEAM RESOURCES]
-Team budget: {team_total} tokens across {max_iterations} iterations.
-This is sufficient for the task - focus on quality."""
+    # Fallback for other conditions - return empty (not used in current design)
+    return ""

@@ -6,7 +6,9 @@ Provides statistical analysis including:
 3. Paired analysis with McNemar's test (within-subjects design)
 4. Interaction effects (condition × difficulty)
 5. Token usage patterns
-6. Direction of effect assessment
+6. First-iteration success analysis (key finding!)
+7. Truncation analysis
+8. Direction of effect assessment
 
 Usage:
     python -m experiments.part2_multi_agent.analyze_code_review_pilot
@@ -522,6 +524,193 @@ def analyze_iterations(results: dict[str, Any]) -> None:
         )
 
 
+def analyze_first_iteration_success(results: dict[str, Any]) -> None:
+    """Analyze first-iteration success rates - a key finding!
+
+    This metric is cleaner than overall success because it removes
+    the confound of iterative refinement.
+    """
+    print("\n" + "=" * 80)
+    print("FIRST-ITERATION SUCCESS ANALYSIS (KEY FINDING)")
+    print("=" * 80)
+
+    trials = results["trials"]
+
+    # First-iteration success by condition
+    for condition in ["NO_AWARENESS", "OVERALL_AND_INDIVIDUAL"]:
+        cond_trials = [t for t in trials if t["awareness_condition"] == condition]
+        if not cond_trials:
+            continue
+
+        first_success = [
+            1 if t["success"] and t["num_iterations"] == 1 else 0 for t in cond_trials
+        ]
+        first_ci = bootstrap_ci(first_success, statistic="proportion")
+
+        total_success = sum(1 for t in cond_trials if t["success"])
+        first_of_success = sum(
+            1 for t in cond_trials if t["success"] and t["num_iterations"] == 1
+        )
+
+        print(f"\n{condition}:")
+        print(
+            f"  First-iteration success: {first_ci[0] * 100:.1f}% "
+            f"[{first_ci[1] * 100:.1f}%, {first_ci[2] * 100:.1f}%]"
+        )
+        print(f"  Of {total_success} successes, {first_of_success} were on first try")
+        if total_success > 0:
+            print(f"  ({first_of_success / total_success * 100:.0f}% of successes)")
+
+    # Compute difference in first-iteration success
+    unaware_first = [
+        1 if t["success"] and t["num_iterations"] == 1 else 0
+        for t in trials
+        if t["awareness_condition"] == "NO_AWARENESS"
+    ]
+    aware_first = [
+        1 if t["success"] and t["num_iterations"] == 1 else 0
+        for t in trials
+        if t["awareness_condition"] == "OVERALL_AND_INDIVIDUAL"
+    ]
+
+    diff_ci = bootstrap_difference_ci(aware_first, unaware_first)
+    print("\nFirst-Iteration Success Difference (Aware - Unaware):")
+    print(
+        f"  {diff_ci[0] * 100:+.1f}pp [{diff_ci[1] * 100:+.1f}pp, {diff_ci[2] * 100:+.1f}pp]"
+    )
+
+    # Fisher's exact test
+    unaware_first_n = sum(unaware_first)
+    unaware_not_first = len(unaware_first) - unaware_first_n
+    aware_first_n = sum(aware_first)
+    aware_not_first = len(aware_first) - aware_first_n
+
+    # Compute odds ratio
+    if aware_first_n > 0:
+        odds_ratio = (unaware_first_n * aware_not_first) / (
+            aware_first_n * unaware_not_first
+        )
+        print(f"\n  Odds ratio (unaware/aware): {odds_ratio:.2f}")
+        print(f"  Unaware agents {odds_ratio:.1f}× more likely to succeed on first try")
+
+    # Paired analysis for first-iteration success
+    print("\nPaired Analysis (McNemar's test for first-iteration success):")
+
+    # Group by problem
+    problems: dict[str, dict[str, bool]] = {}
+    for t in trials:
+        pid = t["problem_id"]
+        cond = t["awareness_condition"]
+        if pid not in problems:
+            problems[pid] = {}
+        problems[pid][cond] = t["success"] and t["num_iterations"] == 1
+
+    # Build paired outcomes for first-iteration success
+    paired_first: list[tuple[int, int]] = []
+    for pid, conds in problems.items():
+        if "NO_AWARENESS" in conds and "OVERALL_AND_INDIVIDUAL" in conds:
+            u = 1 if conds["NO_AWARENESS"] else 0
+            a = 1 if conds["OVERALL_AND_INDIVIDUAL"] else 0
+            paired_first.append((u, a))
+
+    # Count discordant pairs
+    unaware_only_first = sum(1 for u, a in paired_first if u == 1 and a == 0)
+    aware_only_first = sum(1 for u, a in paired_first if u == 0 and a == 1)
+    both_first = sum(1 for u, a in paired_first if u == 1 and a == 1)
+
+    print(f"  Both first-iteration success: {both_first}")
+    print(f"  Only UNAWARE first-iteration success: {unaware_only_first}")
+    print(f"  Only AWARE first-iteration success: {aware_only_first}")
+
+    n_discordant = unaware_only_first + aware_only_first
+    if n_discordant > 0:
+        # Exact binomial test
+        from math import comb
+
+        k = min(unaware_only_first, aware_only_first)
+        p_value = 0.0
+        for i in range(k + 1):
+            p_value += comb(n_discordant, i) * (0.5**n_discordant)
+        p_value *= 2
+        p_value = min(p_value, 1.0)
+
+        print(f"\n  McNemar's test p-value: {p_value:.4f}")
+        if p_value < 0.05:
+            print("  → SIGNIFICANT at α=0.05")
+            if unaware_only_first > aware_only_first:
+                print("  → Budget awareness HURTS first-iteration success")
+        else:
+            print("  → Not significant at α=0.05")
+
+
+def analyze_truncation(results: dict[str, Any]) -> None:
+    """Analyze truncation patterns."""
+    print("\n" + "=" * 80)
+    print("TRUNCATION ANALYSIS")
+    print("=" * 80)
+
+    trials = results["trials"]
+
+    # Check if truncation data is available
+    if not any("any_truncation" in t for t in trials):
+        print("\nNo truncation data available in results.")
+        print("(Run with updated code_review_runner to track truncation)")
+        return
+
+    # Overall truncation stats
+    truncated = [t for t in trials if t.get("any_truncation", False)]
+    print(
+        f"\nTruncated trials: {len(truncated)}/{len(trials)} ({len(truncated) / len(trials) * 100:.1f}%)"
+    )
+
+    if not truncated:
+        print("\nNo truncated trials detected - budget limits appear adequate.")
+        return
+
+    # By condition
+    print("\nTruncation by Condition:")
+    for condition in ["NO_AWARENESS", "OVERALL_AND_INDIVIDUAL"]:
+        cond_trials = [t for t in trials if t["awareness_condition"] == condition]
+        cond_truncated = [t for t in cond_trials if t.get("any_truncation", False)]
+        print(
+            f"  {condition}: {len(cond_truncated)}/{len(cond_trials)} "
+            f"({len(cond_truncated) / len(cond_trials) * 100:.1f}%)"
+        )
+
+    # By difficulty
+    print("\nTruncation by Difficulty:")
+    for difficulty in ["easy", "medium"]:
+        diff_trials = [t for t in trials if t["difficulty"] == difficulty]
+        diff_truncated = [t for t in diff_trials if t.get("any_truncation", False)]
+        if diff_trials:
+            print(
+                f"  {difficulty.upper()}: {len(diff_truncated)}/{len(diff_trials)} "
+                f"({len(diff_truncated) / len(diff_trials) * 100:.1f}%)"
+            )
+
+    # Failure reasons breakdown
+    print("\nFailure Reasons (all failed trials):")
+    failure_counts: dict[str, int] = {}
+    for t in trials:
+        if not t["success"]:
+            reason = t.get("failure_reason", "unknown")
+            failure_counts[reason] = failure_counts.get(reason, 0) + 1
+
+    for reason, count in sorted(failure_counts.items(), key=lambda x: -x[1]):
+        pct = count / sum(failure_counts.values()) * 100
+        print(f"  {reason}: {count} ({pct:.1f}%)")
+
+    # List truncated trials
+    if truncated:
+        print("\nTruncated Trials Detail:")
+        for t in truncated:
+            print(
+                f"  - {t['problem_title'][:40]}... "
+                f"({t['difficulty']}, {t['awareness_condition'][:12]})"
+            )
+            print(f"    Coder tokens: {t['coder_tokens']}, Success: {t['success']}")
+
+
 def power_analysis(results: dict[str, Any]) -> None:
     """Estimate power and sample size recommendations."""
     print("\n" + "=" * 80)
@@ -657,6 +846,8 @@ def main() -> None:
     analyze_difficulty_moderation(results)
     analyze_token_usage(results)
     analyze_iterations(results)
+    analyze_first_iteration_success(results)  # Key finding!
+    analyze_truncation(results)  # New truncation tracking
     power_analysis(results)
     summary_recommendation(results)
 

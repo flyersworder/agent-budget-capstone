@@ -455,11 +455,21 @@ def print_summary(results: PilotResults) -> None:
 
 async def main() -> None:
     """Main entry point."""
+    import sys
+
     load_dotenv()
 
+    # Allow seed override via command line: python -m ... --seed 123
+    seed = 42
+    if "--seed" in sys.argv:
+        idx = sys.argv.index("--seed")
+        if idx + 1 < len(sys.argv):
+            seed = int(sys.argv[idx + 1])
+            print(f"Using custom seed: {seed}")
+
     config = PilotConfig(
-        problems_per_difficulty=20,  # 20 medium + 20 hard = 40 problems × 2 conditions = 80 trials
-        random_seed=42,
+        problems_per_difficulty=20,  # 20 easy + 20 medium = 40 problems × 2 conditions = 80 trials
+        random_seed=seed,
     )
 
     results = await run_pilot(config)
